@@ -28,19 +28,38 @@ const destIcon = L.divIcon({
   iconAnchor: [8, 8],
 });
 
-function greatCircleSegments(
+// Unwrap an array of [lat, lon] so longitudes are continuous (no ±180 jumps).
+// Leaflet renders points outside [-180,180] in its world-copy tiles, so a
+// single Polyline drawn this way crosses the antimeridian smoothly.
+function unwrapLons(points: [number, number][]): [number, number][] {
+  if (points.length === 0) return [];
+  const out: [number, number][] = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const prevLon = out[i - 1][1];
+    let lon = points[i][1];
+    while (lon - prevLon > 180) lon -= 360;
+    while (prevLon - lon > 180) lon += 360;
+    out.push([points[i][0], lon]);
+  }
+  return out;
+}
+
+// Great circle path as a single continuous polyline (200 steps for smoothness).
+function greatCirclePath(
   lat1: number, lon1: number,
   lat2: number, lon2: number,
-  steps = 100
-): [number, number][][] {
+  steps = 200
+): [number, number][] {
   const toRad = (d: number) => (d * Math.PI) / 180;
   const toDeg = (r: number) => (r * 180) / Math.PI;
   const φ1 = toRad(lat1), λ1 = toRad(lon1);
   const φ2 = toRad(lat2), λ2 = toRad(lon2);
+
   const d = 2 * Math.asin(Math.sqrt(
     Math.sin((φ2 - φ1) / 2) ** 2 +
     Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
   ));
+
   const raw: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const f = i / steps;
@@ -49,25 +68,13 @@ function greatCircleSegments(
     const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
     const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
     const z = A * Math.sin(φ1) + B * Math.sin(φ2);
-    const φ = Math.atan2(z, Math.sqrt(x ** 2 + y ** 2));
-    const λ = Math.atan2(y, x);
-    raw.push([toDeg(φ), toDeg(λ)]);
+    raw.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
   }
-  const segments: [number, number][][] = [];
-  let current: [number, number][] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    if (Math.abs(raw[i][1] - raw[i - 1][1]) > 180) {
-      segments.push(current);
-      current = [raw[i]];
-    } else {
-      current.push(raw[i]);
-    }
-  }
-  segments.push(current);
-  return segments;
+
+  return unwrapLons(raw);
 }
 
-// Geodesic circle: compute points at `radiusKm` distance in every direction
+// Geodesic circle — 360 points at exactly `radiusKm` in every direction.
 function geodesicCirclePoints(lat: number, lon: number, radiusKm: number, steps = 360): [number, number][] {
   const R = 6371;
   const d = radiusKm / R;
@@ -75,46 +82,47 @@ function geodesicCirclePoints(lat: number, lon: number, radiusKm: number, steps 
   const toDeg = (rad: number) => (rad * 180) / Math.PI;
   const φ1 = toRad(lat);
   const λ1 = toRad(lon);
-  const points: [number, number][] = [];
+
+  const raw: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const θ = toRad((i * 360) / steps);
-    const φ2 = Math.asin(
-      Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(θ)
-    );
+    const φ2 = Math.asin(Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(θ));
     const λ2 = λ1 + Math.atan2(
       Math.sin(θ) * Math.sin(d) * Math.cos(φ1),
       Math.cos(d) - Math.sin(φ1) * Math.sin(φ2)
     );
-    points.push([toDeg(φ2), toDeg(λ2)]);
+    raw.push([toDeg(φ2), toDeg(λ2)]);
   }
-  return points;
+
+  return unwrapLons(raw);
 }
 
 interface FitBoundsProps {
-  markerPositions: [number, number][];
+  userLat: number;
+  userLon: number;
+  destLat: number;
+  destLon: number;
   radiusKm?: number;
-  userLat?: number;
-  userLon?: number;
 }
 
-function FitBounds({ markerPositions, radiusKm, userLat, userLon }: FitBoundsProps) {
+function FitBounds({ userLat, userLon, destLat, destLon, radiusKm }: FitBoundsProps) {
   const map = useMap();
   const fitted = useRef(false);
 
   useEffect(() => {
-    if (!fitted.current && markerPositions.length >= 1) {
-      let bounds = L.latLngBounds(markerPositions);
-      if (radiusKm && userLat !== undefined && userLon !== undefined) {
-        const degLat = (radiusKm / 6371) * (180 / Math.PI);
-        const degLon = degLat / Math.cos((userLat * Math.PI) / 180);
-        bounds = bounds.extend([userLat + degLat, userLon - degLon]);
-        bounds = bounds.extend([userLat - degLat, userLon + degLon]);
-      }
-      // maxZoom: 3 keeps a global perspective so the arc's curvature is visible
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
-      fitted.current = true;
+    if (fitted.current) return;
+    fitted.current = true;
+
+    let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
+    if (radiusKm) {
+      const degLat = (radiusKm / 6371) * (180 / Math.PI);
+      const degLon = degLat / Math.max(Math.cos((userLat * Math.PI) / 180), 0.01);
+      bounds = bounds.extend([userLat + degLat, userLon - degLon]);
+      bounds = bounds.extend([userLat - degLat, userLon + degLon]);
     }
-  }, [map, markerPositions, radiusKm, userLat, userLon]);
+    // Cap zoom so the arc curvature stays visible at a global scale
+    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
+  }, [map, userLat, userLon, destLat, destLon, radiusKm]);
 
   return null;
 }
@@ -129,13 +137,13 @@ interface DistanceMapProps {
 
 export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles }: DistanceMapProps) {
   const center: [number, number] = [(userLat + destLat) / 2, (userLon + destLon) / 2];
-  const markerPositions: [number, number][] = [[userLat, userLon], [destLat, destLon]];
-  const arcSegments = greatCircleSegments(userLat, userLon, destLat, destLon);
+
+  const arc = greatCirclePath(userLat, userLon, destLat, destLon);
 
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
   const circlePoints = radiusKm ? geodesicCirclePoints(userLat, userLon, radiusKm) : null;
 
-  const lineStyle = { color: "#2563eb", weight: 2.5, opacity: 0.6, dashArray: "6 6" };
+  const lineStyle = { color: "#2563eb", weight: 2.5, opacity: 0.7, dashArray: "6 6" };
   const circleStyle = { color: "#2563eb", weight: 2, opacity: 0.8, fillColor: "#2563eb", fillOpacity: 0.08 };
 
   return (
@@ -147,6 +155,7 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
       <MapContainer
         center={center}
         zoom={2}
+        worldCopyJump={false}
         style={{ height: "100%", width: "100%", background: "#f8fafc" }}
         zoomControl={true}
         attributionControl={true}
@@ -156,6 +165,7 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
           subdomains="abcd"
           maxZoom={19}
+          noWrap={false}
         />
 
         {circlePoints && (
@@ -165,15 +175,15 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
         <Marker position={[userLat, userLon]} icon={userIcon} />
         <Marker position={[destLat, destLon]} icon={destIcon} />
 
-        {arcSegments.map((seg, i) => (
-          <Polyline key={i} positions={seg} pathOptions={lineStyle} />
-        ))}
+        {/* Single continuous arc — no antimeridian split */}
+        <Polyline positions={arc} pathOptions={lineStyle} />
 
         <FitBounds
-          markerPositions={markerPositions}
-          radiusKm={radiusKm}
           userLat={userLat}
           userLon={userLon}
+          destLat={destLat}
+          destLon={destLon}
+          radiusKm={radiusKm}
         />
       </MapContainer>
     </div>
