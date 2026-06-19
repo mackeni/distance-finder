@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle } from "lucide-react";
+import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle } from "lucide-react";
 import { haversineKm, getBearing, getCompassDirection } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ export default function Home() {
   const [destLoc, setDestLoc] = useState<{ lat: number; lon: number; name: string } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
+  const [radiusInput, setRadiusInput] = useState<string>("");
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -88,10 +89,15 @@ export default function Home() {
     setDestLoc(null);
     setDistanceKm(null);
     setBearing(null);
+    setRadiusInput("");
     if (inputRef.current) {
       inputRef.current.focus();
     }
   };
+
+  const parsedRadius = radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
+    ? parseFloat(radiusInput)
+    : undefined;
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8">
@@ -191,12 +197,38 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* Radius Input */}
+              <div className="flex items-center gap-3 max-w-sm mx-auto">
+                <div className="relative flex-1">
+                  <Circle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    data-testid="input-radius"
+                    type="number"
+                    min="0"
+                    placeholder="Radius in miles (optional)"
+                    value={radiusInput}
+                    onChange={(e) => setRadiusInput(e.target.value)}
+                    className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50"
+                  />
+                </div>
+                {radiusInput && (
+                  <button
+                    data-testid="button-clear-radius"
+                    onClick={() => setRadiusInput("")}
+                    className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
               {/* Map */}
               <DistanceMap
                 userLat={userLoc.lat}
                 userLon={userLoc.lon}
                 destLat={destLoc.lat}
                 destLon={destLoc.lon}
+                radiusMiles={parsedRadius}
               />
 
               {/* Detail Cards */}
