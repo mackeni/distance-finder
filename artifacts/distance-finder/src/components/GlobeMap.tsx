@@ -166,38 +166,35 @@ function GlobeInner({
       geometry: { type: "Polygon", coordinates: [circleCoords] },
     });
 
-    // Markers
+    // Markers — anchor:'left' so the dot sits exactly on the coordinate
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
     if (hasUser) {
       markersRef.current.push(
-        new maplibregl.Marker({ element: makeMarkerEl("#93c5fd", userLabel) })
+        new maplibregl.Marker({ element: makeMarkerEl("#93c5fd", userLabel), anchor: "left" })
           .setLngLat([userLon!, userLat!])
           .addTo(map)
       );
     }
     if (hasDest) {
       markersRef.current.push(
-        new maplibregl.Marker({
-          element: makeMarkerEl("#fbbf24", destName || "Destination"),
-        })
+        new maplibregl.Marker({ element: makeMarkerEl("#fbbf24", destName || "Destination"), anchor: "left" })
           .setLngLat([destLon!, destLat!])
           .addTo(map)
       );
     }
 
-    // Camera
+    // Camera — fitBounds reliably frames both points; fall back to flyTo for single location
     if (!hasUser) {
       map.flyTo({ center: [15, 30], zoom: 1.5, duration: 800 });
     } else if (hasDest && destLat !== undefined && destLon !== undefined) {
-      const distKm = haversineKm(userLat!, userLon!, destLat, destLon);
-      const padding = 80;
-      const zoom = Math.max(1, Math.min(6, 8 - Math.log2(distKm / 100 + 1)));
-      map.flyTo({
-        center: [(userLon! + destLon) / 2, (userLat! + destLat) / 2],
-        zoom,
-        duration: 800,
-      });
+      map.fitBounds(
+        [
+          [Math.min(userLon!, destLon!), Math.min(userLat!, destLat!)],
+          [Math.max(userLon!, destLon!), Math.max(userLat!, destLat!)],
+        ],
+        { padding: 80, maxZoom: 12, duration: 800 }
+      );
     } else if (radiusKm) {
       const radiusDeg = radiusKm / 111.32;
       map.fitBounds(
