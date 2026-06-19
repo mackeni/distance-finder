@@ -17,9 +17,12 @@ interface GlobeMapProps {
 
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
   const d = radiusKm / 6371.0088;
-  if (d >= Math.PI) return []; // covers full globe — skip
+  if (d >= Math.PI) return [];
   const latR = (lat * Math.PI) / 180;
   const lonR = (lon * Math.PI) / 180;
+  const containsNorthPole = latR + d > Math.PI / 2;
+  const containsSouthPole = latR - d < -Math.PI / 2;
+
   const coords: number[][] = [];
   for (let i = 0; i <= steps; i++) {
     const θ = (i / steps) * 2 * Math.PI;
@@ -34,11 +37,26 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
       );
     coords.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
   }
-  // Unwrap longitudes so they're continuous — prevents antimeridian jump artefacts
+
+  // Unwrap longitudes so they're continuous
   for (let i = 1; i < coords.length; i++) {
     while (coords[i][0] - coords[i - 1][0] > 180) coords[i][0] -= 360;
     while (coords[i][0] - coords[i - 1][0] < -180) coords[i][0] += 360;
   }
+
+  // For circles that contain a pole the ring traces the boundary correctly on the sphere
+  // but the polar cap (from the ring's reflected top to the pole) is left unshaded on a
+  // Mercator map.  Fix: pop the auto-close point and add explicit cap corners then re-close.
+  if (containsNorthPole || containsSouthPole) {
+    const capLat = containsNorthPole ? 89.9 : -89.9;
+    const closing = coords.pop()!;          // [lonStart − 360, lat_top] — closing duplicate
+    const lonEnd = closing[0];              // longitude on the "west" side after full traverse
+    const lonStart = coords[0][0];          // longitude on the "east" side (θ = 0)
+    coords.push([lonEnd, capLat]);          // up/down to pole cap at west side
+    coords.push([lonStart, capLat]);        // across the cap to east side
+    coords.push([lonStart, coords[0][1]]); // close back to first ring point
+  }
+
   return coords;
 }
 
@@ -343,6 +361,7 @@ function GlobeInner({
       return () => { map.off("click", handler); canvas.style.cursor = ""; };
     } else {
       canvas.style.cursor = "";
+      return;
     }
   }, [pickMode, onPickLocation]);
 
