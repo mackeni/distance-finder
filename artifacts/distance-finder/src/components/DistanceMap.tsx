@@ -28,6 +28,51 @@ const destIcon = L.divIcon({
   iconAnchor: [8, 8],
 });
 
+function greatCircleSegments(
+  lat1: number, lon1: number,
+  lat2: number, lon2: number,
+  steps = 100
+): [number, number][][] {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+
+  const φ1 = toRad(lat1), λ1 = toRad(lon1);
+  const φ2 = toRad(lat2), λ2 = toRad(lon2);
+
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((φ2 - φ1) / 2) ** 2 +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+  ));
+
+  const raw: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(φ1) * Math.cos(λ1) + B * Math.cos(φ2) * Math.cos(λ2);
+    const y = A * Math.cos(φ1) * Math.sin(λ1) + B * Math.cos(φ2) * Math.sin(λ2);
+    const z = A * Math.sin(φ1) + B * Math.sin(φ2);
+    const φ = Math.atan2(z, Math.sqrt(x ** 2 + y ** 2));
+    const λ = Math.atan2(y, x);
+    raw.push([toDeg(φ), toDeg(λ)]);
+  }
+
+  // Split at antimeridian crossings so the line doesn't wrap across the globe
+  const segments: [number, number][][] = [];
+  let current: [number, number][] = [raw[0]];
+  for (let i = 1; i < raw.length; i++) {
+    const dLon = Math.abs(raw[i][1] - raw[i - 1][1]);
+    if (dLon > 180) {
+      segments.push(current);
+      current = [raw[i]];
+    } else {
+      current.push(raw[i]);
+    }
+  }
+  segments.push(current);
+  return segments;
+}
+
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
   const fitted = useRef(false);
@@ -56,10 +101,19 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon }: Dist
     (userLon + destLon) / 2,
   ];
 
-  const positions: [number, number][] = [
+  const markerPositions: [number, number][] = [
     [userLat, userLon],
     [destLat, destLon],
   ];
+
+  const arcSegments = greatCircleSegments(userLat, userLon, destLat, destLon);
+
+  const lineStyle = {
+    color: "#2563eb",
+    weight: 2.5,
+    opacity: 0.6,
+    dashArray: "6 6",
+  };
 
   return (
     <div
@@ -70,7 +124,7 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon }: Dist
       <MapContainer
         center={center}
         zoom={4}
-        style={{ height: "100%", width: "100%", background: "#0f172a" }}
+        style={{ height: "100%", width: "100%", background: "#f8fafc" }}
         zoomControl={true}
         attributionControl={true}
       >
@@ -84,17 +138,11 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon }: Dist
         <Marker position={[userLat, userLon]} icon={userIcon} />
         <Marker position={[destLat, destLon]} icon={destIcon} />
 
-        <Polyline
-          positions={positions}
-          pathOptions={{
-            color: "#2563eb",
-            weight: 2.5,
-            opacity: 0.6,
-            dashArray: "6 6",
-          }}
-        />
+        {arcSegments.map((seg, i) => (
+          <Polyline key={i} positions={seg} pathOptions={lineStyle} />
+        ))}
 
-        <FitBounds positions={positions} />
+        <FitBounds positions={markerPositions} />
       </MapContainer>
     </div>
   );
