@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import DistanceMap from "@/components/GlobeMap";
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
+type PickMode = "from" | "to" | null;
 type Unit = "miles" | "km";
 
 interface LocResult { lat: number; lon: number; name: string }
@@ -39,6 +40,8 @@ export default function Home() {
 
   // Radius
   const [radiusInput, setRadiusInput] = useState("");
+
+  const [pickMode, setPickMode] = useState<PickMode>(null);
 
   const toInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,6 +121,53 @@ export default function Home() {
           : err.message || "An unknown error occurred."
       );
       setStatus("error");
+    }
+  };
+
+  const handlePickLocation = async (lat: number, lng: number) => {
+    const mode = pickMode;
+    setPickMode(null);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`
+      );
+      const data = await res.json();
+      const fullName: string = data.display_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      const shortName: string =
+        data.name ||
+        data.address?.city ||
+        data.address?.town ||
+        data.address?.village ||
+        data.address?.county ||
+        fullName.split(",")[0].trim();
+      const loc: LocResult = { lat, lon: lng, name: fullName };
+      if (mode === "from") {
+        setFromInput(shortName);
+        setCustomStart(loc);
+        if (destLoc) {
+          setDistanceKm(haversineKm(lat, lng, destLoc.lat, destLoc.lon));
+          setBearing(getBearing(lat, lng, destLoc.lat, destLoc.lon));
+          setStatus("success");
+        } else {
+          setStatus("idle");
+        }
+      } else {
+        setToInput(shortName);
+        setDestLoc(loc);
+        const startLat = usingCustomStart ? customStart?.lat : gpsLoc?.lat;
+        const startLon = usingCustomStart ? customStart?.lon : gpsLoc?.lon;
+        if (startLat !== undefined && startLon !== undefined) {
+          setDistanceKm(haversineKm(startLat, startLon, lat, lng));
+          setBearing(getBearing(startLat, startLon, lat, lng));
+          setStatus("success");
+        }
+      }
+    } catch {
+      // fall back to raw coords as label
+      const shortName = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      const loc: LocResult = { lat, lon: lng, name: shortName };
+      if (mode === "from") { setFromInput(shortName); setCustomStart(loc); }
+      else { setToInput(shortName); setDestLoc(loc); }
     }
   };
 
@@ -328,15 +378,52 @@ export default function Home() {
 
         {/* Globe — always visible, gains markers/arc as locations are resolved */}
         <div className="w-full space-y-6">
-          <DistanceMap
-            userLat={activeLocLat}
-            userLon={activeLocLon}
-            destLat={destLoc?.lat}
-            destLon={destLoc?.lon}
-            radiusMiles={radiusMilesForMap}
-            destName={destLoc?.name.split(",")[0].trim()}
-            userLabel={userLabel}
-          />
+          <div className="relative">
+            <DistanceMap
+              userLat={activeLocLat}
+              userLon={activeLocLon}
+              destLat={destLoc?.lat}
+              destLon={destLoc?.lon}
+              radiusMiles={radiusMilesForMap}
+              destName={destLoc?.name.split(",")[0].trim()}
+              userLabel={userLabel}
+              pickMode={pickMode}
+              onPickLocation={handlePickLocation}
+            />
+            {/* Pick-mode overlay hint */}
+            {pickMode && (
+              <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-4">
+                <div className="bg-black/70 text-white text-sm font-semibold px-4 py-2 rounded-full backdrop-blur-sm">
+                  Click anywhere on the map to set {pickMode === "from" ? "start" : "destination"}
+                </div>
+              </div>
+            )}
+            {/* Pick buttons */}
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-auto z-10">
+              <button
+                onClick={() => setPickMode(pickMode === "from" ? null : "from")}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg transition-colors border ${
+                  pickMode === "from"
+                    ? "bg-blue-400 text-white border-blue-300"
+                    : "bg-white/90 text-slate-700 border-slate-200 hover:bg-white"
+                }`}
+              >
+                <LocateFixed className="w-3.5 h-3.5" />
+                Set From
+              </button>
+              <button
+                onClick={() => setPickMode(pickMode === "to" ? null : "to")}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg transition-colors border ${
+                  pickMode === "to"
+                    ? "bg-amber-400 text-white border-amber-300"
+                    : "bg-white/90 text-slate-700 border-slate-200 hover:bg-white"
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                Set To
+              </button>
+            </div>
+          </div>
 
           {/* Detail cards */}
           {status === "success" && distanceKm !== null && bearing !== null && destLoc && activeLoc && (
