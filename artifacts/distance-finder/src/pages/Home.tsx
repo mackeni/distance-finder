@@ -3,7 +3,7 @@ import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle, L
 import { haversineKm, getBearing, getCompassDirection } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import DistanceMap from "@/components/DistanceMap";
+import DistanceMap from "@/components/GlobeMap";
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
 type Unit = "miles" | "km";
