@@ -184,28 +184,36 @@ function GlobeInner({
       );
     }
 
-    // Camera — fitBounds reliably frames both points; fall back to flyTo for single location
+    // Camera — build bounds from all visible content then fitBounds
     if (!hasUser) {
       map.flyTo({ center: [15, 30], zoom: 1.5, duration: 800 });
-    } else if (hasDest && destLat !== undefined && destLon !== undefined) {
+    } else {
+      // Start with user location
+      let minLng = userLon!, maxLng = userLon!;
+      let minLat = userLat!, maxLat = userLat!;
+
+      // Expand for radius circle
+      if (radiusKm) {
+        const latDeg = radiusKm / 111.32;
+        const lngDeg = radiusKm / (111.32 * Math.cos((userLat! * Math.PI) / 180));
+        minLng = Math.min(minLng, userLon! - lngDeg);
+        maxLng = Math.max(maxLng, userLon! + lngDeg);
+        minLat = Math.min(minLat, userLat! - latDeg);
+        maxLat = Math.max(maxLat, userLat! + latDeg);
+      }
+
+      // Expand for destination
+      if (hasDest && destLat !== undefined && destLon !== undefined) {
+        minLng = Math.min(minLng, destLon!);
+        maxLng = Math.max(maxLng, destLon!);
+        minLat = Math.min(minLat, destLat!);
+        maxLat = Math.max(maxLat, destLat!);
+      }
+
       map.fitBounds(
-        [
-          [Math.min(userLon!, destLon!), Math.min(userLat!, destLat!)],
-          [Math.max(userLon!, destLon!), Math.max(userLat!, destLat!)],
-        ],
+        [[minLng, minLat], [maxLng, maxLat]],
         { padding: 80, maxZoom: 12, duration: 800 }
       );
-    } else if (radiusKm) {
-      const radiusDeg = radiusKm / 111.32;
-      map.fitBounds(
-        [
-          [userLon! - radiusDeg * 1.4, userLat! - radiusDeg * 1.4],
-          [userLon! + radiusDeg * 1.4, userLat! + radiusDeg * 1.4],
-        ],
-        { padding: 40, duration: 800 }
-      );
-    } else {
-      map.flyTo({ center: [userLon!, userLat!], zoom: 5, duration: 800 });
     }
   }, [hasUser, hasDest, userLat, userLon, destLat, destLon, radiusKm, destName, userLabel]);
 
