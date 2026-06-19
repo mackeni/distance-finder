@@ -90,28 +90,25 @@ function FitBounds({ userLat, userLon, destLat, destLon, radiusKm, trigger }: Fi
     if (trigger === prevTrigger.current) return;
     prevTrigger.current = trigger;
 
+    const PAD: [number, number] = [48, 48];
+
+    // Helper: bounds of the radius circle using Leaflet's own calculation
+    const circleBounds = () =>
+      radiusKm ? L.circle([userLat, userLon], { radius: radiusKm * 1000 }).getBounds() : null;
+
     if (destLat !== undefined && destLon !== undefined) {
-      // Fit both points (+ radius padding)
+      // Both endpoints — fit them, optionally expanded by the radius circle
       let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
-      if (radiusKm) {
-        const degLat = (radiusKm / 6371) * (180 / Math.PI);
-        const degLon = degLat / Math.max(Math.cos((userLat * Math.PI) / 180), 0.01);
-        bounds = bounds.extend([userLat + degLat, userLon - degLon]);
-        bounds = bounds.extend([userLat - degLat, userLon + degLon]);
-      }
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
+      const cb = circleBounds();
+      if (cb) bounds = bounds.extend(cb);
+      map.fitBounds(bounds, { padding: PAD, animate: true });
     } else if (radiusKm) {
-      // Fit around user + radius circle
-      const degLat = (radiusKm / 6371) * (180 / Math.PI);
-      const degLon = degLat / Math.max(Math.cos((userLat * Math.PI) / 180), 0.01);
-      const bounds = L.latLngBounds([
-        [userLat - degLat, userLon - degLon],
-        [userLat + degLat, userLon + degLon],
-      ]);
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 8 });
+      // Radius only — fit the circle
+      const cb = circleBounds()!;
+      map.fitBounds(cb, { padding: PAD, animate: true });
     } else {
-      // Just user location — zoom in moderately
-      map.setView([userLat, userLon], 5);
+      // User location only
+      map.setView([userLat, userLon], 5, { animate: true });
     }
   }, [trigger]);
 
