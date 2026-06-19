@@ -180,13 +180,14 @@ export default function Home() {
             <div className="w-full space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
               {/* Massive Distance Display */}
               <div className="text-center space-y-2">
-                <div className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
-                  {Math.round(distanceKm * 0.621371).toLocaleString()}
+                <div className="flex items-baseline justify-center gap-4">
+                  <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
+                    {Math.round(distanceKm * 0.621371).toLocaleString()}
+                  </span>
+                  <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">miles</span>
                 </div>
-                <div className="flex items-center justify-center gap-6 text-xl sm:text-2xl text-muted-foreground font-medium">
-                  <span>Miles</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary/50"></span>
-                  <span>{Math.round(distanceKm).toLocaleString()} Kilometers</span>
+                <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
+                  <span>{Math.round(distanceKm).toLocaleString()} kilometers</span>
                 </div>
               </div>
 
