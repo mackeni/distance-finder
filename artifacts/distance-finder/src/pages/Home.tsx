@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import DistanceMap from "@/components/DistanceMap";
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
+type Unit = "miles" | "km";
 
 export default function Home() {
   const [status, setStatus] = useState<AppState>("idle");
   const [query, setQuery] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [unit, setUnit] = useState<Unit>("miles");
 
   const [userLoc, setUserLoc] = useState<{ lat: number; lon: number } | null>(null);
   const [locating, setLocating] = useState(false);
@@ -21,7 +23,6 @@ export default function Home() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Acquire user location quietly on mount so the map appears immediately
   useEffect(() => {
     if (!navigator.geolocation) return;
     setLocating(true);
@@ -37,12 +38,10 @@ export default function Home() {
 
   const handleSearch = async () => {
     if (!query.trim()) return;
-
     setStatus("locating");
     setErrorMsg("");
 
     try {
-      // 1. Get User Location (re-acquire for accuracy; use cached if already available)
       let userLat: number;
       let userLon: number;
 
@@ -68,13 +67,10 @@ export default function Home() {
         setStatus("searching");
       }
 
-      // 2. Geocode Destination
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
       );
-
       if (!res.ok) throw new Error("Failed to reach geocoding service.");
-
       const data = await res.json();
       if (!data || data.length === 0)
         throw new Error(`Could not find a location matching "${query}".`);
@@ -85,10 +81,8 @@ export default function Home() {
 
       setDestLoc({ lat: destLat, lon: destLon, name: destName });
 
-      // 3. Calculate
       const dist = haversineKm(userLat, userLon, destLat, destLon);
       const brng = getBearing(userLat, userLon, destLat, destLon);
-
       setDistanceKm(dist);
       setBearing(brng);
       setStatus("success");
@@ -113,10 +107,21 @@ export default function Home() {
     if (inputRef.current) inputRef.current.focus();
   };
 
-  const parsedRadius =
+  // Radius — interpret entered value in the selected unit, pass miles to map
+  const parsedRadiusRaw =
     radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
       ? parseFloat(radiusInput)
       : undefined;
+  const radiusMilesForMap = parsedRadiusRaw
+    ? unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934
+    : undefined;
+
+  // Distance display — primary unit first, secondary below
+  const distanceMiles = distanceKm != null ? distanceKm * 0.621371 : null;
+  const primaryValue  = distanceKm != null ? (unit === "miles" ? distanceMiles! : distanceKm) : null;
+  const primaryLabel  = unit === "miles" ? "miles" : "km";
+  const secondaryValue = distanceKm != null ? (unit === "miles" ? distanceKm : distanceMiles!) : null;
+  const secondaryLabel = unit === "miles" ? "kilometers" : "miles";
 
   const busy = status === "locating" || status === "searching";
 
@@ -137,6 +142,7 @@ export default function Home() {
 
         {/* Input Area */}
         <div className="relative z-10 w-full max-w-lg mx-auto flex flex-col gap-3">
+
           {/* Place search row */}
           <div className="flex gap-2">
             <div className="relative flex-1 group">
@@ -173,7 +179,7 @@ export default function Home() {
             </Button>
           </div>
 
-          {/* Radius row — always visible */}
+          {/* Radius + unit toggle row */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Circle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -181,17 +187,42 @@ export default function Home() {
                 data-testid="input-radius"
                 type="number"
                 min="0"
-                placeholder="Radius in miles (optional)"
+                placeholder={`Radius in ${unit} (optional)`}
                 value={radiusInput}
                 onChange={(e) => setRadiusInput(e.target.value)}
                 className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
               />
             </div>
+
+            {/* Miles / km radio buttons */}
+            <div className="flex items-center rounded-xl border border-border/50 bg-card shadow overflow-hidden text-sm font-medium shrink-0">
+              {(["miles", "km"] as Unit[]).map((u) => (
+                <label
+                  key={u}
+                  className={`flex items-center gap-1.5 px-3 py-2 cursor-pointer transition-colors select-none ${
+                    unit === u
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="unit"
+                    value={u}
+                    checked={unit === u}
+                    onChange={() => setUnit(u)}
+                    className="sr-only"
+                  />
+                  {u}
+                </label>
+              ))}
+            </div>
+
             {radiusInput && (
               <button
                 data-testid="button-clear-radius"
                 onClick={() => setRadiusInput("")}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1"
+                className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -224,22 +255,22 @@ export default function Home() {
           </div>
         )}
 
-        {/* Distance result — only when we have a destination */}
-        {status === "success" && distanceKm !== null && bearing !== null && destLoc && (
+        {/* Distance result */}
+        {status === "success" && primaryValue !== null && bearing !== null && destLoc && (
           <div className="text-center space-y-2 animate-in slide-in-from-bottom-8 duration-700 fade-in">
             <div className="flex items-baseline justify-center gap-4">
               <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
-                {Math.round(distanceKm * 0.621371).toLocaleString()}
+                {Math.round(primaryValue).toLocaleString()}
               </span>
-              <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">miles</span>
+              <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">{primaryLabel}</span>
             </div>
             <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
-              <span>{Math.round(distanceKm).toLocaleString()} kilometers</span>
+              <span>{Math.round(secondaryValue!).toLocaleString()} {secondaryLabel}</span>
             </div>
           </div>
         )}
 
-        {/* Map — shown as soon as user location is known */}
+        {/* Map */}
         {locating && !userLoc && (
           <div className="flex flex-col items-center text-muted-foreground space-y-3 py-8 animate-in fade-in duration-500">
             <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
@@ -254,11 +285,11 @@ export default function Home() {
               userLon={userLoc.lon}
               destLat={destLoc?.lat}
               destLon={destLoc?.lon}
-              radiusMiles={parsedRadius}
+              radiusMiles={radiusMilesForMap}
               destName={destLoc?.name.split(",")[0].trim()}
             />
 
-            {/* Detail cards — only when destination is known */}
+            {/* Detail cards */}
             {status === "success" && distanceKm !== null && bearing !== null && destLoc && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
                 <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
