@@ -48,54 +48,6 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
   return coords;
 }
 
-function makeLabel(text: string, color: string): HTMLElement {
-  const el = document.createElement("div");
-  el.style.cssText = [
-    "pointer-events:none",
-    "display:flex",
-    "align-items:center",
-    "gap:5px",
-    // Shift left by half the dot width and up by half the element height so
-    // the dot centre lands exactly on the coordinate, not the top-left corner.
-    "transform:translate(-4.5px,-50%)",
-  ].join(";");
-
-  const dot = document.createElement("div");
-  dot.style.cssText = [
-    `background:${color}`,
-    "width:9px",
-    "height:9px",
-    "border-radius:50%",
-    "flex-shrink:0",
-    `box-shadow:0 0 0 2px rgba(255,255,255,0.9),0 0 6px ${color}`,
-  ].join(";");
-
-  const pill = document.createElement("div");
-  pill.style.cssText = [
-    "background:rgba(255,255,255,0.92)",
-    "backdrop-filter:blur(4px)",
-    "border-radius:20px",
-    "padding:2px 8px",
-    "box-shadow:0 1px 4px rgba(0,0,0,0.25)",
-  ].join(";");
-
-  const label = document.createElement("span");
-  label.textContent = text;
-  label.style.cssText = [
-    `color:${color === "#93c5fd" ? "#1d4ed8" : "#92400e"}`,
-    "font-size:11px",
-    "font-weight:700",
-    "font-family:system-ui,-apple-system,sans-serif",
-    "white-space:nowrap",
-    "letter-spacing:0.02em",
-  ].join(";");
-
-  pill.appendChild(label);
-  el.appendChild(dot);
-  el.appendChild(pill);
-  return el;
-}
-
 class GlobeErrorBoundary extends Component<
   { children: React.ReactNode },
   { crashed: boolean }
@@ -144,7 +96,6 @@ function GlobeInner({
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
-  // Track container width for responsive sizing
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -197,7 +148,7 @@ function GlobeInner({
     [hasUser, hasDest, userLat, userLon, destLat, destLon]
   );
 
-  const htmlLabels = useMemo(() => {
+  const pinData = useMemo(() => {
     const pts: { lat: number; lng: number; text: string; color: string }[] = [];
     if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
     if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
@@ -246,18 +197,22 @@ function GlobeInner({
           arcDashGap={0}
           arcDashAnimateTime={0}
           arcStroke={0.5}
-          pointsData={htmlLabels}
+          pointsData={pinData}
           pointLat="lat"
           pointLng="lng"
           pointColor="color"
-          pointRadius={0.35}
-          pointAltitude={0}
+          pointRadius={0.5}
+          pointAltitude={0.01}
           pointResolution={12}
-          htmlElementsData={htmlLabels}
-          htmlLat="lat"
-          htmlLng="lng"
-          htmlAltitude={0}
-          htmlElement={(d: any) => makeLabel(d.text, d.color)}
+          labelsData={pinData}
+          labelLat="lat"
+          labelLng="lng"
+          labelText="text"
+          labelColor={(d: any) => d.color}
+          labelSize={0.6}
+          labelAltitude={0.01}
+          labelResolution={3}
+          labelDotRadius={0}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
           polygonCapColor={() => "rgba(251,191,36,0.28)"}
