@@ -198,35 +198,43 @@ function GlobeInner({
     }
 
     // Camera — build bounds from all visible content then fitBounds
+    const clampLat = (v: number) => Math.max(-85, Math.min(85, v));
+    const clampLng = (v: number) => Math.max(-180, Math.min(180, v));
+
     if (!hasUser) {
       map.flyTo({ center: [15, 30], zoom: 1.5, duration: 800 });
     } else {
-      // Start with user location
       let minLng = userLon!, maxLng = userLon!;
       let minLat = userLat!, maxLat = userLat!;
 
-      // Expand for radius circle
+      // Expand for radius circle — clamp so we never exceed valid map bounds
       if (radiusKm) {
         const latDeg = radiusKm / 111.32;
-        const lngDeg = radiusKm / (111.32 * Math.cos((userLat! * Math.PI) / 180));
-        minLng = Math.min(minLng, userLon! - lngDeg);
-        maxLng = Math.max(maxLng, userLon! + lngDeg);
-        minLat = Math.min(minLat, userLat! - latDeg);
-        maxLat = Math.max(maxLat, userLat! + latDeg);
+        const cosLat = Math.cos((userLat! * Math.PI) / 180);
+        const lngDeg = cosLat > 0.001 ? radiusKm / (111.32 * cosLat) : 180;
+        minLng = clampLng(userLon! - lngDeg);
+        maxLng = clampLng(userLon! + lngDeg);
+        minLat = clampLat(userLat! - latDeg);
+        maxLat = clampLat(userLat! + latDeg);
       }
 
       // Expand for destination
       if (hasDest && destLat !== undefined && destLon !== undefined) {
         minLng = Math.min(minLng, destLon!);
         maxLng = Math.max(maxLng, destLon!);
-        minLat = Math.min(minLat, destLat!);
-        maxLat = Math.max(maxLat, destLat!);
+        minLat = clampLat(Math.min(minLat, destLat!));
+        maxLat = clampLat(Math.max(maxLat, destLat!));
       }
 
-      map.fitBounds(
-        [[minLng, minLat], [maxLng, maxLat]],
-        { padding: 80, maxZoom: 12, duration: 800 }
-      );
+      // If radius covers most of the globe just zoom out to world view
+      if (minLng <= -179 && maxLng >= 179 && minLat <= -84 && maxLat >= 84) {
+        map.flyTo({ center: [userLon!, userLat!], zoom: 0.5, duration: 800 });
+      } else {
+        map.fitBounds(
+          [[minLng, minLat], [maxLng, maxLat]],
+          { padding: 80, maxZoom: 12, duration: 800 }
+        );
+      }
     }
   }, [hasUser, hasDest, userLat, userLon, destLat, destLon, radiusKm, destName, userLabel]);
 
@@ -296,8 +304,11 @@ function GlobeInner({
       updateLayers();
     });
 
-    map.on("error", (e) => {
-      if (String(e.error).includes("WebGL")) setNoWebGL(true);
+    map.on("error", (e: any) => {
+      const isWebGLInit =
+        e?.error?.type === "webglcontextcreationerror" ||
+        String(e?.error?.message ?? "").includes("Failed to initialize WebGL");
+      if (isWebGLInit) setNoWebGL(true);
     });
 
     return () => {
