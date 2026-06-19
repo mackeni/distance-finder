@@ -66,7 +66,6 @@ export default function Home() {
     : "You are here";
 
   const handleSearch = async () => {
-    if (!toInput.trim()) return;
     setStatus("locating");
     setErrorMsg("");
 
@@ -75,7 +74,6 @@ export default function Home() {
       let startLon: number;
 
       if (usingCustomStart) {
-        // Geocode the typed "from" place
         setStatus("searching");
         const from = await geocode(fromInput.trim());
         setCustomStart(from);
@@ -99,12 +97,18 @@ export default function Home() {
         setStatus("searching");
       }
 
-      // Geocode destination
-      const dest = await geocode(toInput.trim());
-      setDestLoc(dest);
+      // Geocode destination only if one was entered
+      if (toInput.trim()) {
+        const dest = await geocode(toInput.trim());
+        setDestLoc(dest);
+        setDistanceKm(haversineKm(startLat, startLon, dest.lat, dest.lon));
+        setBearing(getBearing(startLat, startLon, dest.lat, dest.lon));
+      } else {
+        setDestLoc(null);
+        setDistanceKm(null);
+        setBearing(null);
+      }
 
-      setDistanceKm(haversineKm(startLat, startLon, dest.lat, dest.lon));
-      setBearing(getBearing(startLat, startLon, dest.lat, dest.lon));
       setStatus("success");
     } catch (err: any) {
       console.error(err);
@@ -199,7 +203,7 @@ export default function Home() {
             <Button
               data-testid="button-search-from"
               onClick={handleSearch}
-              disabled={!toInput.trim() || busy}
+              disabled={busy}
               className="h-auto px-6 sm:px-8 rounded-2xl shadow bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
@@ -235,7 +239,7 @@ export default function Home() {
             <Button
               data-testid="button-search"
               onClick={handleSearch}
-              disabled={!toInput.trim() || busy}
+              disabled={busy}
               className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
