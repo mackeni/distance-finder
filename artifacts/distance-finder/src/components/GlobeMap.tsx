@@ -11,6 +11,8 @@ interface GlobeMapProps {
   radiusMiles?: number;
   destName?: string;
   userLabel?: string;
+  pickMode?: "from" | "to" | null;
+  onPickLocation?: (lat: number, lng: number) => void;
 }
 
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
@@ -130,7 +132,7 @@ class GlobeErrorBoundary extends Component<
 
 function GlobeInner({
   userLat, userLon, destLat, destLon, radiusMiles, destName,
-  userLabel = "You are here",
+  userLabel = "You are here", pickMode, onPickLocation,
 }: GlobeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -298,6 +300,23 @@ function GlobeInner({
   useEffect(() => {
     updateLayers();
   }, [updateLayers]);
+
+  // Pick mode: crosshair cursor + click handler
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    const canvas = map.getCanvas();
+    if (pickMode) {
+      canvas.style.cursor = "crosshair";
+      const handler = (e: maplibregl.MapMouseEvent) => {
+        onPickLocation?.(e.lngLat.lat, e.lngLat.lng);
+      };
+      map.on("click", handler);
+      return () => { map.off("click", handler); canvas.style.cursor = ""; };
+    } else {
+      canvas.style.cursor = "";
+    }
+  }, [pickMode, onPickLocation]);
 
   if (noWebGL) return <NoWebGLFallback />;
 
