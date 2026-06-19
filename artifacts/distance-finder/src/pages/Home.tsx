@@ -144,10 +144,13 @@ export default function Home() {
       if (mode === "from") {
         setFromInput(shortName);
         setCustomStart(loc);
-        setDestLoc(null);
-        setDistanceKm(null);
-        setBearing(null);
-        setStatus("idle");
+        if (destLoc) {
+          setDistanceKm(haversineKm(lat, lng, destLoc.lat, destLoc.lon));
+          setBearing(getBearing(lat, lng, destLoc.lat, destLoc.lon));
+          setStatus("success");
+        } else {
+          setStatus("idle");
+        }
       } else {
         setToInput(shortName);
         setDestLoc(loc);
@@ -396,7 +399,7 @@ export default function Home() {
               </div>
             )}
             {/* Pick buttons */}
-            <div className="absolute bottom-3 right-3 flex gap-2 pointer-events-auto">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-auto z-10">
               <button
                 onClick={() => setPickMode(pickMode === "from" ? null : "from")}
                 className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg transition-colors border ${
