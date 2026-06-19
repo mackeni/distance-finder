@@ -187,7 +187,16 @@ function GlobeInner({
           ref={globeRef}
           width={globeWidth}
           height={500}
-          onGlobeReady={fitCamera}
+          onGlobeReady={() => {
+            if (globeRef.current) {
+              const controls = globeRef.current.controls();
+              controls.enableZoom = true;
+              controls.zoomSpeed = 1.2;
+              controls.minDistance = 105;
+              controls.maxDistance = 900;
+            }
+            fitCamera();
+          }}
           globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
           backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
           atmosphereColor="#6baeff"
