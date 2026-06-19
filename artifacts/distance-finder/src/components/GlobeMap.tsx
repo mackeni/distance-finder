@@ -49,35 +49,16 @@ function makeLabel(text: string, color: string): HTMLElement {
   const el = document.createElement("div");
   el.style.cssText = [
     "pointer-events:none",
-    "display:flex",
-    "align-items:center",
-    "gap:5px",
     "white-space:nowrap",
     "font-family:system-ui,-apple-system,sans-serif",
-    "font-size:12px",
+    "font-size:11px",
     "font-weight:700",
-    "letter-spacing:0.02em",
-  ].join(";");
-
-  const dot = document.createElement("div");
-  dot.style.cssText = [
-    `background:${color}`,
-    "width:8px",
-    "height:8px",
-    "border-radius:50%",
-    "flex-shrink:0",
-    `box-shadow:0 0 6px ${color}`,
-  ].join(";");
-
-  const span = document.createElement("span");
-  span.textContent = text;
-  span.style.cssText = [
+    "letter-spacing:0.03em",
     `color:${color}`,
     "text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 12px rgba(0,0,0,0.8)",
+    "padding-left:10px",
   ].join(";");
-
-  el.appendChild(dot);
-  el.appendChild(span);
+  el.textContent = text;
   return el;
 }
 
@@ -212,16 +193,23 @@ function GlobeInner({
           atmosphereColor="#6baeff"
           atmosphereAltitude={0.2}
           arcsData={arcsData}
-          arcColor={() => "rgba(147,197,253,0.5)"}
-          arcAltitude={0}
+          arcColor={() => "rgba(147,197,253,0.7)"}
+          arcAltitude={0.3}
           arcDashLength={1}
           arcDashGap={0}
           arcDashAnimateTime={0}
-          arcStroke={0.8}
+          arcStroke={0.5}
+          pointsData={htmlLabels}
+          pointLat="lat"
+          pointLng="lng"
+          pointColor="color"
+          pointRadius={0.35}
+          pointAltitude={0}
+          pointResolution={12}
           htmlElementsData={htmlLabels}
           htmlLat="lat"
           htmlLng="lng"
-          htmlAltitude={0.02}
+          htmlAltitude={0}
           htmlElement={(d: any) => makeLabel(d.text, d.color)}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
