@@ -67,8 +67,7 @@ function greatCirclePoints(
 
 function makeMarkerEl(color: string, text: string): HTMLElement {
   const el = document.createElement("div");
-  el.style.cssText =
-    "display:flex;align-items:center;gap:6px;pointer-events:none;";
+  el.style.cssText = "display:flex;align-items:center;gap:5px;pointer-events:none;";
 
   const dot = document.createElement("div");
   dot.style.cssText = [
@@ -77,23 +76,35 @@ function makeMarkerEl(color: string, text: string): HTMLElement {
     "height:10px",
     "border-radius:50%",
     "flex-shrink:0",
-    `box-shadow:0 0 8px ${color}`,
+    `box-shadow:0 0 0 2px rgba(255,255,255,0.9),0 0 6px ${color}`,
+  ].join(";");
+
+  const pill = document.createElement("div");
+  pill.style.cssText = [
+    "background:rgba(255,255,255,0.92)",
+    "backdrop-filter:blur(4px)",
+    "-webkit-backdrop-filter:blur(4px)",
+    "border-radius:20px",
+    "padding:2px 8px",
+    "box-shadow:0 1px 4px rgba(0,0,0,0.18)",
+    "display:flex",
+    "align-items:center",
   ].join(";");
 
   const label = document.createElement("span");
   label.textContent = text;
   label.style.cssText = [
-    `color:${color}`,
+    `color:${color === "#93c5fd" ? "#1d4ed8" : "#92400e"}`,
     "font-size:11px",
     "font-weight:700",
     "font-family:system-ui,-apple-system,sans-serif",
     "white-space:nowrap",
-    "letter-spacing:0.03em",
-    "text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 12px rgba(0,0,0,0.8)",
+    "letter-spacing:0.02em",
   ].join(";");
 
+  pill.appendChild(label);
   el.appendChild(dot);
-  el.appendChild(label);
+  el.appendChild(pill);
   return el;
 }
 
