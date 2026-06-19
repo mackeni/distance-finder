@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, Circle, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, Circle, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 
 const userIcon = L.divIcon({
@@ -145,9 +145,10 @@ interface DistanceMapProps {
   destLat?: number;
   destLon?: number;
   radiusMiles?: number;
+  destName?: string;
 }
 
-export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles }: DistanceMapProps) {
+export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles, destName }: DistanceMapProps) {
   const hasDest = destLat !== undefined && destLon !== undefined;
   const center: [number, number] = hasDest
     ? [(userLat + destLat!) / 2, (userLon + destLon!) / 2]
@@ -198,11 +199,31 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           <Polyline positions={circlePoints} pathOptions={circleStyle} />
         )}
 
-        <Marker position={[userLat, userLon]} icon={userIcon} />
+        <Marker position={[userLat, userLon]} icon={userIcon}>
+          <Tooltip
+            permanent
+            direction="top"
+            offset={[0, -10]}
+            className="map-label map-label--user"
+          >
+            You are here
+          </Tooltip>
+        </Marker>
 
         {hasDest && (
           <>
-            <Marker position={[destLat!, destLon!]} icon={destIcon} />
+            <Marker position={[destLat!, destLon!]} icon={destIcon}>
+              {destName && (
+                <Tooltip
+                  permanent
+                  direction="top"
+                  offset={[0, -11]}
+                  className="map-label map-label--dest"
+                >
+                  {destName}
+                </Tooltip>
+              )}
+            </Marker>
             {arc && <Polyline positions={arc} pathOptions={lineStyle} />}
           </>
         )}

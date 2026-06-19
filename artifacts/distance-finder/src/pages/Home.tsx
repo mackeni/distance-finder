@@ -255,6 +255,7 @@ export default function Home() {
               destLat={destLoc?.lat}
               destLon={destLoc?.lon}
               radiusMiles={parsedRadius}
+              destName={destLoc?.name.split(",")[0].trim()}
             />
 
             {/* Detail cards — only when destination is known */}

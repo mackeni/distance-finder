@@ -242,3 +242,28 @@
     pointer-events: none;
   }
 }
+
+/* Map place-name labels */
+.map-label {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  pointer-events: none !important;
+}
+.map-label::before { display: none !important; }
+
+.map-label--user {
+  color: #1d4ed8;
+  text-shadow: 0 1px 3px rgba(255,255,255,0.95), 0 0 6px rgba(255,255,255,0.8);
+}
+
+.map-label--dest {
+  color: #92400e;
+  text-shadow: 0 1px 3px rgba(255,255,255,0.95), 0 0 6px rgba(255,255,255,0.8);
+}
