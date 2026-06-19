@@ -92,20 +92,27 @@ function FitBounds({ userLat, userLon, destLat, destLon, radiusKm, trigger }: Fi
 
     const PAD: [number, number] = [48, 48];
 
-    // Helper: bounds of the radius circle using Leaflet's own calculation
-    const circleBounds = () =>
-      radiusKm ? L.circle([userLat, userLon], { radius: radiusKm * 1000 }).getBounds() : null;
+    // Compute lat/lon extents of the radius circle without needing a map instance.
+    // 111.32 km per degree latitude; longitude degrees shrink with cos(lat).
+    const radiusBounds = () => {
+      if (!radiusKm) return null;
+      const dLat = radiusKm / 111.32;
+      const dLon = radiusKm / (111.32 * Math.max(Math.cos((userLat * Math.PI) / 180), 0.0001));
+      return L.latLngBounds(
+        [userLat - dLat, userLon - dLon],
+        [userLat + dLat, userLon + dLon],
+      );
+    };
 
     if (destLat !== undefined && destLon !== undefined) {
       // Both endpoints — fit them, optionally expanded by the radius circle
       let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
-      const cb = circleBounds();
-      if (cb) bounds = bounds.extend(cb);
+      const rb = radiusBounds();
+      if (rb) bounds = bounds.extend(rb);
       map.fitBounds(bounds, { padding: PAD, animate: true });
     } else if (radiusKm) {
       // Radius only — fit the circle
-      const cb = circleBounds()!;
-      map.fitBounds(cb, { padding: PAD, animate: true });
+      map.fitBounds(radiusBounds()!, { padding: PAD, animate: true });
     } else {
       // User location only
       map.setView([userLat, userLon], 5, { animate: true });
