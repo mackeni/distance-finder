@@ -85,38 +85,43 @@ interface FitBoundsProps {
 function FitBounds({ userLat, userLon, destLat, destLon, radiusKm, trigger }: FitBoundsProps) {
   const map = useMap();
   const prevTrigger = useRef<string>("");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep a live ref so the debounced callback always reads the latest values
+  const liveRef = useRef({ userLat, userLon, destLat, destLon, radiusKm });
+  liveRef.current = { userLat, userLon, destLat, destLon, radiusKm };
 
   useEffect(() => {
     if (trigger === prevTrigger.current) return;
     prevTrigger.current = trigger;
 
-    const PAD: [number, number] = [48, 48];
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const { userLat, userLon, destLat, destLon, radiusKm } = liveRef.current;
+      const PAD: [number, number] = [48, 48];
 
-    // Compute lat/lon extents of the radius circle without needing a map instance.
-    // 111.32 km per degree latitude; longitude degrees shrink with cos(lat).
-    const radiusBounds = () => {
-      if (!radiusKm) return null;
-      const dLat = radiusKm / 111.32;
-      const dLon = radiusKm / (111.32 * Math.max(Math.cos((userLat * Math.PI) / 180), 0.0001));
-      return L.latLngBounds(
-        [userLat - dLat, userLon - dLon],
-        [userLat + dLat, userLon + dLon],
-      );
-    };
+      const radiusBounds = () => {
+        if (!radiusKm) return null;
+        const dLat = radiusKm / 111.32;
+        const dLon = radiusKm / (111.32 * Math.max(Math.cos((userLat * Math.PI) / 180), 0.0001));
+        return L.latLngBounds(
+          [userLat - dLat, userLon - dLon],
+          [userLat + dLat, userLon + dLon],
+        );
+      };
 
-    if (destLat !== undefined && destLon !== undefined) {
-      // Both endpoints — fit them, optionally expanded by the radius circle
-      let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
-      const rb = radiusBounds();
-      if (rb) bounds = bounds.extend(rb);
-      map.fitBounds(bounds, { padding: PAD, animate: true });
-    } else if (radiusKm) {
-      // Radius only — fit the circle
-      map.fitBounds(radiusBounds()!, { padding: PAD, animate: true });
-    } else {
-      // User location only
-      map.setView([userLat, userLon], 5, { animate: true });
-    }
+      if (destLat !== undefined && destLon !== undefined) {
+        let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
+        const rb = radiusBounds();
+        if (rb) bounds = bounds.extend(rb);
+        map.fitBounds(bounds, { padding: PAD, animate: true });
+      } else if (radiusKm) {
+        map.fitBounds(radiusBounds()!, { padding: PAD, animate: true });
+      } else {
+        map.setView([userLat, userLon], 5, { animate: true });
+      }
+    }, 350);
+
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [trigger]);
 
   return null;
