@@ -16,8 +16,10 @@ interface GlobeMapProps {
 }
 
 /**
- * Generates the raw ring boundary (unwrapped longitudes, no closing duplicate).
- * i < steps so the last point is NOT a repeat of the first.
+ * Generates the geodesic ring boundary.  Coordinates are normalised to (−180, 180] so
+ * MapLibre can apply its own antimeridian handling.  No longitude unwrapping is used —
+ * unwrapping produces coordinates far outside [−180, 180] for non-zero centre longitudes
+ * which causes the 360°-wide-polygon fill artefacts.
  */
 function geodesicRing(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
   const d = radiusKm / 6371.0088;
@@ -36,73 +38,101 @@ function geodesicRing(lat: number, lon: number, radiusKm: number, steps = 128): 
         Math.sin(θ) * Math.sin(d) * Math.cos(latR),
         Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
       );
-    ring.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
-  }
-  for (let i = 1; i < ring.length; i++) {
-    while (ring[i][0] - ring[i - 1][0] > 180) ring[i][0] -= 360;
-    while (ring[i][0] - ring[i - 1][0] < -180) ring[i][0] += 360;
+    let lonDeg = (lon2 * 180) / Math.PI;
+    while (lonDeg >  180) lonDeg -= 360;
+    while (lonDeg <= -180) lonDeg += 360;
+    ring.push([lonDeg, (lat2 * 180) / Math.PI]);
   }
   return ring;
 }
 
 /**
  * Builds the fill geometry (Polygon or MultiPolygon) and outline LineString for a
- * geodesic circle.  For circles that cross a pole, a MultiPolygon is used so the
- * polar cap is a plain rectangle separate from the bowl — this avoids the 360°-span
- * artefact and prevents cap seam edges leaking into the outline.
+ * geodesic circle.
+ *
+ * For normal circles (not crossing a pole) a single GeoJSON Polygon works fine.
+ *
+ * For pole-crossing circles a different strategy is used: the fill is decomposed into
+ * 360 axis-aligned 1°-wide longitude strips.  Each strip is a trivial CCW rectangle
+ * [lonMin → lonMin+1, latMin → latMax] computed analytically from the geodesic equation.
+ * This eliminates all antimeridian-crossing polygon issues and all winding-order
+ * ambiguities in one shot.
  */
 function buildCircleGeometry(lat: number, lon: number, radiusKm: number) {
   const d = radiusKm / 6371.0088;
   if (d >= Math.PI) return null;
   const latR = (lat * Math.PI) / 180;
-  const containsNorthPole = latR + d > Math.PI / 2;
-  const containsSouthPole = latR - d < -Math.PI / 2;
+  const cosD  = Math.cos(d);
+  const sinC  = Math.sin(latR);
+  const cosC  = Math.cos(latR);
 
   const ring = geodesicRing(lat, lon, radiusKm);
   if (ring.length < 3) return null;
+  const closedRing = [...ring, ring[0]];
 
-  const lonStart = ring[0][0];
-  const lonEnd   = ring[ring.length - 1][0]; // ≈ lonStart − 360 for pole-crossing circles
-  const latTop   = ring[0][1];               // reflected latitude at θ = 0
+  const containsNorthPole = latR + d > Math.PI / 2;
+  const containsSouthPole = latR - d < -Math.PI / 2;
 
   if (!containsNorthPole && !containsSouthPole) {
-    const closedRing = [...ring, ring[0]];
     return {
       fill: { type: "Polygon" as const, coordinates: [closedRing] },
       line: closedRing,
     };
   }
 
-  // Pole-crossing — split into two non-overlapping polygons so there is no double shading
-  // and no 360°-spanning single polygon that MapLibre fills incorrectly.
-  const capLat = containsNorthPole ? 89.9 : -89.9;
+  // Build fill as 360 × 1° longitude strips — each is a simple CCW rectangle.
+  // For each strip we solve the geodesic equation for the lat range covered by the circle.
+  const polygons: number[][][][] = [];
 
-  // Bowl: ring closed with interpolated points along latTop so the closing segment is broken
-  // into short steps — avoids the ambiguous degenerate 360° closing jump.
-  const CLOSE_STEPS = 8;
-  const closingPts: number[][] = [];
-  for (let i = 1; i <= CLOSE_STEPS; i++) {
-    closingPts.push([lonEnd + (lonStart - lonEnd) * (i / CLOSE_STEPS), latTop]);
+  for (let i = 0; i < 360; i++) {
+    const lonMin = -180 + i;
+    const lonMax = lonMin + 1;
+    const lonMid = lonMin + 0.5;
+
+    // Normalise angular difference to (−180, 180]
+    let dLdeg = lonMid - lon;
+    while (dLdeg >  180) dLdeg -= 360;
+    while (dLdeg <= -180) dLdeg += 360;
+
+    const cosCosDL = cosC * Math.cos((dLdeg * Math.PI) / 180);
+    const R     = Math.sqrt(sinC * sinC + cosCosDL * cosCosDL);
+    const ratio = cosD / R;
+
+    if (ratio > 1) continue; // strip is entirely outside the circle
+
+    let latMin: number;
+    let latMax: number;
+
+    if (ratio <= -1) {
+      // Circle covers every latitude at this longitude
+      latMin = -89.9;
+      latMax =  89.9;
+    } else {
+      const phi    = Math.atan2(cosCosDL, sinC);
+      const arcVal = Math.asin(ratio);
+      const yA = (arcVal - phi)              * (180 / Math.PI);
+      const yB = (Math.PI - arcVal - phi)    * (180 / Math.PI);
+      latMin = Math.max(-89.9, Math.min(yA, yB));
+      latMax = Math.min( 89.9, Math.max(yA, yB));
+    }
+
+    if (latMin >= latMax) continue;
+
+    // CCW rectangle: bottom-left → bottom-right → top-right → top-left → close
+    polygons.push([[
+      [lonMin, latMin],
+      [lonMax, latMin],
+      [lonMax, latMax],
+      [lonMin, latMax],
+      [lonMin, latMin],
+    ]]);
   }
-  const bowlRing = [...ring, ...closingPts]; // last closingPt == ring[0], closes the ring
 
-  // Cap rectangle: CCW winding = BL → TL → TR → BR → close.
-  // lonEnd ≈ lonStart − 360 so the rectangle spans the full 360° of longitude.
-  const capRing = [
-    [lonEnd,   latTop],
-    [lonEnd,   capLat],
-    [lonStart, capLat],
-    [lonStart, latTop],
-    [lonEnd,   latTop],
-  ];
+  if (polygons.length === 0) return null;
 
   return {
-    fill: {
-      type: "MultiPolygon" as const,
-      coordinates: [[bowlRing], [capRing]],
-    },
-    // Outline is only the ring boundary — no cap edges drawn as lines on the map.
-    line: ring,
+    fill: { type: "MultiPolygon" as const, coordinates: polygons },
+    line: closedRing,
   };
 }
 
