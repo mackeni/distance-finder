@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, Circle, useMap } from "react-leaflet";
 import L from "leaflet";
 
 const userIcon = L.divIcon({
@@ -168,8 +168,16 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           noWrap={false}
         />
 
-        {/* Circle drawn as Polyline with unwrapped lons — avoids cross-world
-            closure line that Polygon gets when the circle crosses ±180° */}
+        {/* Filled area: native Leaflet Circle handles edge cases internally */}
+        {radiusKm && (
+          <Circle
+            center={[userLat, userLon]}
+            radius={radiusKm * 1000}
+            pathOptions={{ color: "transparent", fillColor: "#2563eb", fillOpacity: 0.1, stroke: false }}
+          />
+        )}
+
+        {/* Accurate geodesic boundary as a Polyline with unwrapped lons */}
         {circlePoints && (
           <Polyline positions={circlePoints} pathOptions={circleStyle} />
         )}
