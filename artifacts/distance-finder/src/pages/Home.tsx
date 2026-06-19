@@ -326,57 +326,47 @@ export default function Home() {
           </div>
         )}
 
-        {/* Location spinner (GPS mode, map not yet ready) */}
-        {!usingCustomStart && gpsLocating && !gpsLoc && (
-          <div className="flex flex-col items-center text-muted-foreground space-y-3 py-8 animate-in fade-in duration-500">
-            <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
-            <p className="font-mono text-xs uppercase tracking-widest">Getting your location…</p>
-          </div>
-        )}
+        {/* Globe — always visible, gains markers/arc as locations are resolved */}
+        <div className="w-full space-y-6">
+          <DistanceMap
+            userLat={activeLocLat}
+            userLon={activeLocLon}
+            destLat={destLoc?.lat}
+            destLon={destLoc?.lon}
+            radiusMiles={radiusMilesForMap}
+            destName={destLoc?.name.split(",")[0].trim()}
+            userLabel={userLabel}
+          />
 
-        {/* Map */}
-        {showMap && (
-          <div className="w-full space-y-6 animate-in fade-in duration-500">
-            <DistanceMap
-              userLat={activeLocLat!}
-              userLon={activeLocLon!}
-              destLat={destLoc?.lat}
-              destLon={destLoc?.lon}
-              radiusMiles={radiusMilesForMap}
-              destName={destLoc?.name.split(",")[0].trim()}
-              userLabel={userLabel}
-            />
-
-            {/* Detail cards */}
-            {status === "success" && distanceKm !== null && bearing !== null && destLoc && activeLoc && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
-                <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
-                  <div className="p-3 rounded-2xl bg-secondary/50">
-                    <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
-                  </div>
-                  <h3 className="font-medium text-foreground">Bearing</h3>
-                  <p className="text-sm text-muted-foreground font-mono">
-                    {Math.round(bearing)}° {getCompassDirection(bearing)}
-                  </p>
+          {/* Detail cards */}
+          {status === "success" && distanceKm !== null && bearing !== null && destLoc && activeLoc && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
+              <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
+                <div className="p-3 rounded-2xl bg-secondary/50">
+                  <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
                 </div>
+                <h3 className="font-medium text-foreground">Bearing</h3>
+                <p className="text-sm text-muted-foreground font-mono">
+                  {Math.round(bearing)}° {getCompassDirection(bearing)}
+                </p>
+              </div>
 
-                <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center sm:col-span-2">
-                  <div className="p-3 rounded-2xl bg-secondary/50">
-                    <MapPin className="w-6 h-6 text-primary" />
-                  </div>
-                  <h3 className="font-medium text-foreground line-clamp-1 w-full" title={destLoc.name}>
-                    {destLoc.name}
-                  </h3>
-                  <div className="flex gap-4 text-xs text-muted-foreground font-mono mt-1">
-                    <span>FROM: {activeLoc.lat.toFixed(4)}, {activeLoc.lon.toFixed(4)}</span>
-                    <span className="hidden sm:inline">•</span>
-                    <span>TO: {destLoc.lat.toFixed(4)}, {destLoc.lon.toFixed(4)}</span>
-                  </div>
+              <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center sm:col-span-2">
+                <div className="p-3 rounded-2xl bg-secondary/50">
+                  <MapPin className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="font-medium text-foreground line-clamp-1 w-full" title={destLoc.name}>
+                  {destLoc.name}
+                </h3>
+                <div className="flex gap-4 text-xs text-muted-foreground font-mono mt-1">
+                  <span>FROM: {activeLoc.lat.toFixed(4)}, {activeLoc.lon.toFixed(4)}</span>
+                  <span className="hidden sm:inline">•</span>
+                  <span>TO: {destLoc.lat.toFixed(4)}, {destLoc.lon.toFixed(4)}</span>
                 </div>
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
 
       </div>
     </div>

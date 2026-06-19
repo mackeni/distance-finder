@@ -1,15 +1,27 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
+import React, { useRef, useEffect, useState, useMemo, useCallback, Component } from "react";
 import Globe, { GlobeMethods } from "react-globe.gl";
 import { haversineKm } from "@/lib/geo";
 
 interface GlobeMapProps {
-  userLat: number;
-  userLon: number;
+  userLat?: number;
+  userLon?: number;
   destLat?: number;
   destLon?: number;
   radiusMiles?: number;
   destName?: string;
   userLabel?: string;
+}
+
+function hasWebGL(): boolean {
+  try {
+    const canvas = document.createElement("canvas");
+    return !!(
+      window.WebGLRenderingContext &&
+      (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
@@ -33,22 +45,88 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
   return coords;
 }
 
-export default function GlobeMap({
-  userLat,
-  userLon,
-  destLat,
-  destLon,
-  radiusMiles,
-  destName,
-  userLabel = "You are here",
+function makeLabel(text: string, color: string): HTMLElement {
+  const el = document.createElement("div");
+  el.style.cssText = [
+    "pointer-events:none",
+    "display:flex",
+    "align-items:center",
+    "gap:5px",
+    "white-space:nowrap",
+    "font-family:system-ui,-apple-system,sans-serif",
+    "font-size:12px",
+    "font-weight:700",
+    "letter-spacing:0.02em",
+  ].join(";");
+
+  const dot = document.createElement("div");
+  dot.style.cssText = [
+    `background:${color}`,
+    "width:8px",
+    "height:8px",
+    "border-radius:50%",
+    "flex-shrink:0",
+    `box-shadow:0 0 6px ${color}`,
+  ].join(";");
+
+  const span = document.createElement("span");
+  span.textContent = text;
+  span.style.cssText = [
+    `color:${color}`,
+    "text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 12px rgba(0,0,0,0.8)",
+  ].join(";");
+
+  el.appendChild(dot);
+  el.appendChild(span);
+  return el;
+}
+
+class GlobeErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { crashed: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { crashed: false };
+  }
+  static getDerivedStateFromError() {
+    return { crashed: true };
+  }
+  render() {
+    if (this.state.crashed) return <NoWebGLFallback />;
+    return this.props.children;
+  }
+}
+
+function NoWebGLFallback() {
+  return (
+    <div
+      data-testid="map-container"
+      className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
+      style={{ height: 500 }}
+    >
+      <span className="text-4xl">🌍</span>
+      <p className="text-muted-foreground font-medium">
+        3D globe requires WebGL
+      </p>
+      <p className="text-sm text-muted-foreground/60">
+        Available in Chrome, Firefox, Safari, and most mobile browsers.
+      </p>
+    </div>
+  );
+}
+
+function GlobeInner({
+  userLat, userLon, destLat, destLon, radiusMiles, destName, userLabel = "You are here",
 }: GlobeMapProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [globeWidth, setGlobeWidth] = useState(600);
+  const [globeWidth, setGlobeWidth] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveRef = useRef({ userLat, userLon, destLat, destLon, radiusMiles });
   liveRef.current = { userLat, userLon, destLat, destLon, radiusMiles };
 
+  const hasUser = userLat !== undefined && userLon !== undefined;
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
@@ -56,9 +134,7 @@ export default function GlobeMap({
     const el = containerRef.current;
     if (!el) return;
     setGlobeWidth(el.clientWidth);
-    const ro = new ResizeObserver((entries) => {
-      setGlobeWidth(entries[0].contentRect.width);
-    });
+    const ro = new ResizeObserver((entries) => setGlobeWidth(entries[0].contentRect.width));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -66,32 +142,31 @@ export default function GlobeMap({
   const fitCamera = useCallback(() => {
     if (!globeRef.current) return;
     const { userLat, userLon, destLat, destLon, radiusMiles } = liveRef.current;
+    const hasUser = userLat !== undefined && userLon !== undefined;
     const hasDest = destLat !== undefined && destLon !== undefined;
     const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
+    if (!hasUser) {
+      globeRef.current.pointOfView({ lat: 30, lng: 15, altitude: 2.5 }, 800);
+      return;
+    }
     let lat: number, lng: number, altitude: number;
-
     if (hasDest && destLat !== undefined && destLon !== undefined) {
-      lat = (userLat + destLat) / 2;
-      lng = (userLon + destLon) / 2;
-      const distKm = haversineKm(userLat, userLon, destLat, destLon);
+      lat = (userLat! + destLat) / 2;
+      lng = (userLon! + destLon) / 2;
+      const distKm = haversineKm(userLat!, userLon!, destLat, destLon);
       altitude = Math.max(0.5, Math.min(3.5, distKm / 5000));
     } else if (radiusKm) {
-      lat = userLat;
-      lng = userLon;
+      lat = userLat!; lng = userLon!;
       altitude = Math.max(0.1, Math.min(2.5, radiusKm / 2000));
     } else {
-      lat = userLat;
-      lng = userLon;
-      altitude = 1.5;
+      lat = userLat!; lng = userLon!; altitude = 1.5;
     }
-
     globeRef.current.pointOfView({ lat, lng, altitude }, 800);
   }, []);
 
-  const trigger = `${userLat},${userLon}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
+  const trigger = `${userLat ?? ""},${userLon ?? ""}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
   const prevTrigger = useRef("");
-
   useEffect(() => {
     if (trigger === prevTrigger.current) return;
     prevTrigger.current = trigger;
@@ -101,40 +176,29 @@ export default function GlobeMap({
   }, [trigger, fitCamera]);
 
   const arcsData = useMemo(
-    () =>
-      hasDest
-        ? [{ startLat: userLat, startLng: userLon, endLat: destLat!, endLng: destLon! }]
-        : [],
-    [userLat, userLon, destLat, destLon, hasDest]
+    () => hasUser && hasDest
+      ? [{ startLat: userLat!, startLng: userLon!, endLat: destLat!, endLng: destLon! }]
+      : [],
+    [hasUser, hasDest, userLat, userLon, destLat, destLon]
   );
 
-  const labelsData = useMemo(
-    () => [
-      { lat: userLat, lng: userLon, text: userLabel, labelType: "user" },
-      ...(hasDest
-        ? [{ lat: destLat!, lng: destLon!, text: destName || "Destination", labelType: "dest" }]
-        : []),
-    ],
-    [userLat, userLon, destLat, destLon, hasDest, userLabel, destName]
-  );
+  const htmlLabels = useMemo(() => {
+    const pts: { lat: number; lng: number; text: string; color: string }[] = [];
+    if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
+    if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
+    return pts;
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
 
   const polygonsData = useMemo(() => {
-    if (!radiusKm) return [];
-    return [
-      {
-        geometry: {
-          type: "Polygon" as const,
-          coordinates: [geodesicCircle(userLat, userLon, radiusKm)],
-        },
-      },
-    ];
-  }, [userLat, userLon, radiusKm]);
+    if (!radiusKm || !hasUser) return [];
+    return [{ geometry: { type: "Polygon" as const, coordinates: [geodesicCircle(userLat!, userLon!, radiusKm)] } }];
+  }, [hasUser, userLat, userLon, radiusKm]);
 
   return (
     <div
       ref={containerRef}
       data-testid="map-container"
-      className="w-full rounded-3xl overflow-hidden border border-border/50 shadow-xl bg-black"
+      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black"
       style={{ height: 500 }}
     >
       {globeWidth > 0 && (
@@ -145,8 +209,8 @@ export default function GlobeMap({
           onGlobeReady={fitCamera}
           globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
           backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
-          atmosphereColor="#1e40af"
-          atmosphereAltitude={0.25}
+          atmosphereColor="#6baeff"
+          atmosphereAltitude={0.2}
           arcsData={arcsData}
           arcColor={() => ["#93c5fd", "#fbbf24"]}
           arcAltitudeAutoScale={0.35}
@@ -154,23 +218,29 @@ export default function GlobeMap({
           arcDashGap={0.3}
           arcDashAnimateTime={2500}
           arcStroke={1.5}
-          labelsData={labelsData}
-          labelLat="lat"
-          labelLng="lng"
-          labelText="text"
-          labelColor={(d: any) => (d.labelType === "user" ? "#93c5fd" : "#fbbf24")}
-          labelSize={1.2}
-          labelDotRadius={0.5}
-          labelDotOrientation={() => "bottom" as const}
-          labelAltitude={0.015}
+          htmlElementsData={htmlLabels}
+          htmlLat="lat"
+          htmlLng="lng"
+          htmlAltitude={0.02}
+          htmlElement={(d: any) => makeLabel(d.text, d.color)}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonFillColor={() => "rgba(96,165,250,0.18)"}
-          polygonStrokeColor={() => "#60a5fa"}
+          polygonFillColor={() => "rgba(96,165,250,0.15)"}
+          polygonStrokeColor={() => "#93c5fd"}
           polygonAltitude={0.005}
           enablePointerInteraction
         />
       )}
     </div>
+  );
+}
+
+export default function GlobeMap(props: GlobeMapProps) {
+  const [webglOk] = useState(() => hasWebGL());
+  if (!webglOk) return <NoWebGLFallback />;
+  return (
+    <GlobeErrorBoundary>
+      <GlobeInner {...props} />
+    </GlobeErrorBoundary>
   );
 }
