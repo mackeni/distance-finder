@@ -117,7 +117,12 @@ function GlobeInner({
     setGlobeWidth(el.clientWidth);
     const ro = new ResizeObserver((entries) => setGlobeWidth(entries[0].contentRect.width));
     ro.observe(el);
-    return () => ro.disconnect();
+    const stopScroll = (e: WheelEvent) => e.preventDefault();
+    el.addEventListener("wheel", stopScroll, { passive: false });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("wheel", stopScroll);
+    };
   }, []);
 
   const fitCamera = useCallback(() => {
@@ -192,7 +197,7 @@ function GlobeInner({
               const controls = globeRef.current.controls();
               controls.enableZoom = true;
               controls.zoomSpeed = 1.2;
-              controls.minDistance = 105;
+              controls.minDistance = 101;
               controls.maxDistance = 900;
             }
             fitCamera();
