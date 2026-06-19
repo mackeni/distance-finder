@@ -10,6 +10,8 @@ interface GlobeMapProps {
   radiusMiles?: number;
   destName?: string;
   userLabel?: string;
+  pickMode?: "from" | "to" | null;
+  onPickLocation?: (lat: number, lng: number) => void;
 }
 
 function hasWebGL(): boolean {
@@ -24,6 +26,7 @@ function hasWebGL(): boolean {
   }
 }
 
+/** Generates a closed geodesic circle ring (steps+1 points, first == last). */
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
   const d = radiusKm / 6371.0088;
   const latR = (lat * Math.PI) / 180;
@@ -49,16 +52,44 @@ function makeLabel(text: string, color: string): HTMLElement {
   const el = document.createElement("div");
   el.style.cssText = [
     "pointer-events:none",
-    "white-space:nowrap",
-    "font-family:system-ui,-apple-system,sans-serif",
+    "display:flex",
+    "align-items:center",
+    "gap:5px",
+  ].join(";");
+
+  const dot = document.createElement("div");
+  dot.style.cssText = [
+    `background:${color}`,
+    "width:9px",
+    "height:9px",
+    "border-radius:50%",
+    "flex-shrink:0",
+    `box-shadow:0 0 0 2px rgba(255,255,255,0.9),0 0 6px ${color}`,
+  ].join(";");
+
+  const pill = document.createElement("div");
+  pill.style.cssText = [
+    "background:rgba(255,255,255,0.92)",
+    "backdrop-filter:blur(4px)",
+    "border-radius:20px",
+    "padding:2px 8px",
+    "box-shadow:0 1px 4px rgba(0,0,0,0.25)",
+  ].join(";");
+
+  const label = document.createElement("span");
+  label.textContent = text;
+  label.style.cssText = [
+    `color:${color === "#93c5fd" ? "#1d4ed8" : "#92400e"}`,
     "font-size:11px",
     "font-weight:700",
-    "letter-spacing:0.03em",
-    `color:${color}`,
-    "text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 12px rgba(0,0,0,0.8)",
-    "padding-left:10px",
+    "font-family:system-ui,-apple-system,sans-serif",
+    "white-space:nowrap",
+    "letter-spacing:0.02em",
   ].join(";");
-  el.textContent = text;
+
+  pill.appendChild(label);
+  el.appendChild(dot);
+  el.appendChild(pill);
   return el;
 }
 
@@ -87,9 +118,7 @@ function NoWebGLFallback() {
       style={{ height: 500 }}
     >
       <span className="text-4xl">🌍</span>
-      <p className="text-muted-foreground font-medium">
-        3D globe requires WebGL
-      </p>
+      <p className="text-muted-foreground font-medium">3D globe requires WebGL</p>
       <p className="text-sm text-muted-foreground/60">
         Available in Chrome, Firefox, Safari, and most mobile browsers.
       </p>
@@ -98,7 +127,8 @@ function NoWebGLFallback() {
 }
 
 function GlobeInner({
-  userLat, userLon, destLat, destLon, radiusMiles, destName, userLabel = "You are here",
+  userLat, userLon, destLat, destLon, radiusMiles, destName,
+  userLabel = "You are here", pickMode, onPickLocation,
 }: GlobeMapProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -111,6 +141,7 @@ function GlobeInner({
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
+  // Track container width for responsive sizing
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -172,15 +203,28 @@ function GlobeInner({
 
   const polygonsData = useMemo(() => {
     if (!radiusKm || !hasUser) return [];
-    return [{ geometry: { type: "Polygon" as const, coordinates: [geodesicCircle(userLat!, userLon!, radiusKm)] } }];
+    return [{
+      geometry: {
+        type: "Polygon" as const,
+        coordinates: [geodesicCircle(userLat!, userLon!, radiusKm)],
+      },
+    }];
   }, [hasUser, userLat, userLon, radiusKm]);
+
+  const handleGlobeClick = useCallback((
+    coords: { lat: number; lng: number; altitude: number }
+  ) => {
+    if (pickMode && onPickLocation) {
+      onPickLocation(coords.lat, coords.lng);
+    }
+  }, [pickMode, onPickLocation]);
 
   return (
     <div
       ref={containerRef}
       data-testid="map-container"
       className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black"
-      style={{ height: 500 }}
+      style={{ height: 500, cursor: pickMode ? "crosshair" : "default" }}
     >
       {globeWidth > 0 && (
         <Globe
@@ -193,7 +237,7 @@ function GlobeInner({
           atmosphereColor="#6baeff"
           atmosphereAltitude={0.2}
           arcsData={arcsData}
-          arcColor={() => "rgba(147,197,253,0.7)"}
+          arcColor={() => "rgba(147,197,253,0.75)"}
           arcAltitude={0}
           arcDashLength={1}
           arcDashGap={0}
@@ -217,6 +261,7 @@ function GlobeInner({
           polygonSideColor={() => "rgba(0,0,0,0)"}
           polygonStrokeColor={() => "rgba(251,191,36,0.9)"}
           polygonAltitude={0.005}
+          onGlobeClick={handleGlobeClick}
           enablePointerInteraction
         />
       )}
