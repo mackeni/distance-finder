@@ -174,27 +174,37 @@ export default function Home() {
         <div className="relative z-10 w-full max-w-lg mx-auto flex flex-col gap-3">
 
           {/* From row */}
-          <div className="relative group">
-            <Input
-              data-testid="input-from"
-              type="text"
-              placeholder="From: current location"
-              value={fromInput}
-              onChange={(e) => {
-                setFromInput(e.target.value);
-                // Clear resolved custom start if user edits the field
-                if (customStart) { setCustomStart(null); setDestLoc(null); setDistanceKm(null); setBearing(null); setStatus("idle"); }
-              }}
-              onKeyDown={(e) => { if (e.key === "Enter") toInputRef.current?.focus(); }}
-              disabled={busy}
-              className="pl-12 pr-10 py-5 text-base rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
-            />
-            <LocateFixed className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${fromInput ? "text-muted-foreground" : "text-primary/60"} group-focus-within:text-primary`} />
-            {fromInput && !busy && (
-              <button onClick={handleClearFrom} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1">
-                <X className="w-4 h-4" />
-              </button>
-            )}
+          <div className="flex gap-2">
+            <div className="relative flex-1 group">
+              <Input
+                data-testid="input-from"
+                type="text"
+                placeholder="From: current location"
+                value={fromInput}
+                onChange={(e) => {
+                  setFromInput(e.target.value);
+                  if (customStart) { setCustomStart(null); setDestLoc(null); setDistanceKm(null); setBearing(null); setStatus("idle"); }
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+                disabled={busy}
+                className="pl-12 pr-10 py-5 text-base rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
+              />
+              <LocateFixed className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${fromInput ? "text-muted-foreground" : "text-primary/60"} group-focus-within:text-primary`} />
+              {fromInput && !busy && (
+                <button onClick={handleClearFrom} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <Button
+              data-testid="button-search-from"
+              onClick={handleSearch}
+              disabled={!toInput.trim() || busy}
+              className="h-auto px-6 sm:px-8 rounded-2xl shadow bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
+            >
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
+              <span className="hidden sm:inline ml-2">Find</span>
+            </Button>
           </div>
 
           {/* To row */}
