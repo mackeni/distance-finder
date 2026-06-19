@@ -28,9 +28,6 @@ const destIcon = L.divIcon({
   iconAnchor: [8, 8],
 });
 
-// Unwrap an array of [lat, lon] so longitudes are continuous (no ±180 jumps).
-// Leaflet renders points outside [-180,180] in its world-copy tiles, so a
-// single Polyline drawn this way crosses the antimeridian smoothly.
 function unwrapLons(points: [number, number][]): [number, number][] {
   if (points.length === 0) return [];
   const out: [number, number][] = [points[0]];
@@ -44,7 +41,6 @@ function unwrapLons(points: [number, number][]): [number, number][] {
   return out;
 }
 
-// Great circle path as a single continuous polyline (200 steps for smoothness).
 function greatCirclePath(
   lat1: number, lon1: number,
   lat2: number, lon2: number,
@@ -60,6 +56,8 @@ function greatCirclePath(
     Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
   ));
 
+  if (d === 0) return [[lat1, lon1]];
+
   const raw: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const f = i / steps;
@@ -74,7 +72,6 @@ function greatCirclePath(
   return unwrapLons(raw);
 }
 
-// Geodesic circle — 360 points at exactly `radiusKm` in every direction.
 function geodesicCirclePoints(lat: number, lon: number, radiusKm: number, steps = 360): [number, number][] {
   const R = 6371;
   const d = radiusKm / R;
@@ -100,29 +97,44 @@ function geodesicCirclePoints(lat: number, lon: number, radiusKm: number, steps 
 interface FitBoundsProps {
   userLat: number;
   userLon: number;
-  destLat: number;
-  destLon: number;
+  destLat?: number;
+  destLon?: number;
   radiusKm?: number;
+  trigger: string;
 }
 
-function FitBounds({ userLat, userLon, destLat, destLon, radiusKm }: FitBoundsProps) {
+function FitBounds({ userLat, userLon, destLat, destLon, radiusKm, trigger }: FitBoundsProps) {
   const map = useMap();
-  const fitted = useRef(false);
+  const prevTrigger = useRef<string>("");
 
   useEffect(() => {
-    if (fitted.current) return;
-    fitted.current = true;
+    if (trigger === prevTrigger.current) return;
+    prevTrigger.current = trigger;
 
-    let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
-    if (radiusKm) {
+    if (destLat !== undefined && destLon !== undefined) {
+      // Fit both points (+ radius padding)
+      let bounds = L.latLngBounds([[userLat, userLon], [destLat, destLon]]);
+      if (radiusKm) {
+        const degLat = (radiusKm / 6371) * (180 / Math.PI);
+        const degLon = degLat / Math.max(Math.cos((userLat * Math.PI) / 180), 0.01);
+        bounds = bounds.extend([userLat + degLat, userLon - degLon]);
+        bounds = bounds.extend([userLat - degLat, userLon + degLon]);
+      }
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
+    } else if (radiusKm) {
+      // Fit around user + radius circle
       const degLat = (radiusKm / 6371) * (180 / Math.PI);
       const degLon = degLat / Math.max(Math.cos((userLat * Math.PI) / 180), 0.01);
-      bounds = bounds.extend([userLat + degLat, userLon - degLon]);
-      bounds = bounds.extend([userLat - degLat, userLon + degLon]);
+      const bounds = L.latLngBounds([
+        [userLat - degLat, userLon - degLon],
+        [userLat + degLat, userLon + degLon],
+      ]);
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 8 });
+    } else {
+      // Just user location — zoom in moderately
+      map.setView([userLat, userLon], 5);
     }
-    // Cap zoom so the arc curvature stays visible at a global scale
-    map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
-  }, [map, userLat, userLon, destLat, destLon, radiusKm]);
+  }, [trigger]);
 
   return null;
 }
@@ -130,21 +142,27 @@ function FitBounds({ userLat, userLon, destLat, destLon, radiusKm }: FitBoundsPr
 interface DistanceMapProps {
   userLat: number;
   userLon: number;
-  destLat: number;
-  destLon: number;
+  destLat?: number;
+  destLon?: number;
   radiusMiles?: number;
 }
 
 export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles }: DistanceMapProps) {
-  const center: [number, number] = [(userLat + destLat) / 2, (userLon + destLon) / 2];
+  const hasDest = destLat !== undefined && destLon !== undefined;
+  const center: [number, number] = hasDest
+    ? [(userLat + destLat!) / 2, (userLon + destLon!) / 2]
+    : [userLat, userLon];
 
-  const arc = greatCirclePath(userLat, userLon, destLat, destLon);
+  const arc = hasDest ? greatCirclePath(userLat, userLon, destLat!, destLon!) : null;
 
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
   const circlePoints = radiusKm ? geodesicCirclePoints(userLat, userLon, radiusKm) : null;
 
   const lineStyle = { color: "#2563eb", weight: 2.5, opacity: 0.7, dashArray: "6 6" };
   const circleStyle = { color: "#2563eb", weight: 2, opacity: 0.85 };
+
+  // Trigger string changes whenever something meaningful is added/changed
+  const trigger = `${userLat},${userLon}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
 
   return (
     <div
@@ -168,7 +186,6 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           noWrap={false}
         />
 
-        {/* Filled area: native Leaflet Circle handles edge cases internally */}
         {radiusKm && (
           <Circle
             center={[userLat, userLon]}
@@ -177,16 +194,18 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           />
         )}
 
-        {/* Accurate geodesic boundary as a Polyline with unwrapped lons */}
         {circlePoints && (
           <Polyline positions={circlePoints} pathOptions={circleStyle} />
         )}
 
         <Marker position={[userLat, userLon]} icon={userIcon} />
-        <Marker position={[destLat, destLon]} icon={destIcon} />
 
-        {/* Single continuous arc — no antimeridian split */}
-        <Polyline positions={arc} pathOptions={lineStyle} />
+        {hasDest && (
+          <>
+            <Marker position={[destLat!, destLon!]} icon={destIcon} />
+            {arc && <Polyline positions={arc} pathOptions={lineStyle} />}
+          </>
+        )}
 
         <FitBounds
           userLat={userLat}
@@ -194,6 +213,7 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           destLat={destLat}
           destLon={destLon}
           radiusKm={radiusKm}
+          trigger={trigger}
         />
       </MapContainer>
     </div>

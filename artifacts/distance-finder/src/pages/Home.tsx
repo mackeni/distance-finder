@@ -11,14 +11,29 @@ export default function Home() {
   const [status, setStatus] = useState<AppState>("idle");
   const [query, setQuery] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
-  
+
   const [userLoc, setUserLoc] = useState<{ lat: number; lon: number } | null>(null);
+  const [locating, setLocating] = useState(false);
   const [destLoc, setDestLoc] = useState<{ lat: number; lon: number; name: string } | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
   const [radiusInput, setRadiusInput] = useState<string>("");
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Acquire user location quietly on mount so the map appears immediately
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setLocating(false);
+      },
+      () => setLocating(false),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -27,35 +42,42 @@ export default function Home() {
     setErrorMsg("");
 
     try {
-      // 1. Get User Location
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        if (!navigator.geolocation) {
-          reject(new Error("Geolocation is not supported by your browser."));
-        } else {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0,
-          });
-        }
-      });
+      // 1. Get User Location (re-acquire for accuracy; use cached if already available)
+      let userLat: number;
+      let userLon: number;
 
-      const userLat = pos.coords.latitude;
-      const userLon = pos.coords.longitude;
-      setUserLoc({ lat: userLat, lon: userLon });
+      if (userLoc) {
+        userLat = userLoc.lat;
+        userLon = userLoc.lon;
+        setStatus("searching");
+      } else {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          if (!navigator.geolocation) {
+            reject(new Error("Geolocation is not supported by your browser."));
+          } else {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 0,
+            });
+          }
+        });
+        userLat = pos.coords.latitude;
+        userLon = pos.coords.longitude;
+        setUserLoc({ lat: userLat, lon: userLon });
+        setStatus("searching");
+      }
 
       // 2. Geocode Destination
-      setStatus("searching");
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`);
-      
-      if (!res.ok) {
-        throw new Error("Failed to reach geocoding service.");
-      }
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
+      );
+
+      if (!res.ok) throw new Error("Failed to reach geocoding service.");
 
       const data = await res.json();
-      if (!data || data.length === 0) {
+      if (!data || data.length === 0)
         throw new Error(`Could not find a location matching "${query}".`);
-      }
 
       const destLat = parseFloat(data[0].lat);
       const destLon = parseFloat(data[0].lon);
@@ -63,14 +85,13 @@ export default function Home() {
 
       setDestLoc({ lat: destLat, lon: destLon, name: destName });
 
-      // 3. Calculate Math
+      // 3. Calculate
       const dist = haversineKm(userLat, userLon, destLat, destLon);
       const brng = getBearing(userLat, userLon, destLat, destLon);
 
       setDistanceKm(dist);
       setBearing(brng);
       setStatus("success");
-
     } catch (err: any) {
       console.error(err);
       if (err instanceof GeolocationPositionError) {
@@ -89,20 +110,20 @@ export default function Home() {
     setDestLoc(null);
     setDistanceKm(null);
     setBearing(null);
-    setRadiusInput("");
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
+    if (inputRef.current) inputRef.current.focus();
   };
 
-  const parsedRadius = radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
-    ? parseFloat(radiusInput)
-    : undefined;
+  const parsedRadius =
+    radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
+      ? parseFloat(radiusInput)
+      : undefined;
+
+  const busy = status === "locating" || status === "searching";
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8">
-      <div className="w-full max-w-2xl mx-auto flex flex-col gap-12">
-        
+      <div className="w-full max-w-2xl mx-auto flex flex-col gap-10">
+
         {/* Header */}
         <header className="text-center space-y-4">
           <div className="inline-flex items-center justify-center p-4 rounded-full bg-primary/10 text-primary mb-2 shadow-[0_0_40px_rgba(234,179,8,0.15)] ring-1 ring-primary/20">
@@ -126,14 +147,12 @@ export default function Home() {
                 placeholder="e.g. Tokyo, Eiffel Tower, Sydney Opera House..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSearch();
-                }}
-                disabled={status === "locating" || status === "searching"}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
+                disabled={busy}
                 className="pl-12 pr-10 py-6 text-lg rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow-lg"
               />
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
-              {query && (status === "idle" || status === "success" || status === "error") && (
+              {query && !busy && (
                 <button
                   data-testid="button-clear"
                   onClick={handleClear}
@@ -146,14 +165,10 @@ export default function Home() {
             <Button
               data-testid="button-search"
               onClick={handleSearch}
-              disabled={!query.trim() || status === "locating" || status === "searching"}
+              disabled={!query.trim() || busy}
               className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
-              {status === "locating" || status === "searching" ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Search className="w-5 h-5" />
-              )}
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
               <span className="hidden sm:inline ml-2">Find</span>
             </Button>
           </div>
@@ -184,63 +199,72 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Status Indicators */}
-        <div className="min-h-[300px] flex flex-col items-center w-full">
-          {status === "locating" && (
-            <div className="flex flex-col items-center justify-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
-              <MapPin className="w-8 h-8 animate-bounce text-primary/70" />
-              <p className="font-mono text-sm uppercase tracking-widest">Acquiring GPS Signal...</p>
+        {/* Status messages */}
+        {status === "locating" && (
+          <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
+            <MapPin className="w-8 h-8 animate-bounce text-primary/70" />
+            <p className="font-mono text-sm uppercase tracking-widest">Acquiring GPS Signal...</p>
+          </div>
+        )}
+
+        {status === "searching" && (
+          <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
+            <Search className="w-8 h-8 animate-pulse text-primary/70" />
+            <p className="font-mono text-sm uppercase tracking-widest">Triangulating Destination...</p>
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="flex flex-col items-center text-destructive space-y-4 p-8 bg-destructive/10 rounded-3xl border border-destructive/20 w-full max-w-lg mx-auto animate-in slide-in-from-bottom-4 duration-300">
+            <AlertCircle className="w-10 h-10" />
+            <p className="text-center font-medium text-destructive-foreground/90">{errorMsg}</p>
+            <Button data-testid="button-retry" variant="outline" className="mt-4 border-destructive/30 hover:bg-destructive/20" onClick={handleSearch}>
+              Try Again
+            </Button>
+          </div>
+        )}
+
+        {/* Distance result — only when we have a destination */}
+        {status === "success" && distanceKm !== null && bearing !== null && destLoc && (
+          <div className="text-center space-y-2 animate-in slide-in-from-bottom-8 duration-700 fade-in">
+            <div className="flex items-baseline justify-center gap-4">
+              <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
+                {Math.round(distanceKm * 0.621371).toLocaleString()}
+              </span>
+              <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">miles</span>
             </div>
-          )}
-
-          {status === "searching" && (
-            <div className="flex flex-col items-center justify-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
-              <Search className="w-8 h-8 animate-pulse text-primary/70" />
-              <p className="font-mono text-sm uppercase tracking-widest">Triangulating Destination...</p>
+            <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
+              <span>{Math.round(distanceKm).toLocaleString()} kilometers</span>
             </div>
-          )}
+          </div>
+        )}
 
-          {status === "error" && (
-            <div className="flex flex-col items-center justify-center text-destructive space-y-4 p-8 bg-destructive/10 rounded-3xl border border-destructive/20 w-full max-w-lg animate-in slide-in-from-bottom-4 duration-300">
-              <AlertCircle className="w-10 h-10" />
-              <p className="text-center font-medium text-destructive-foreground/90">{errorMsg}</p>
-              <Button data-testid="button-retry" variant="outline" className="mt-4 border-destructive/30 hover:bg-destructive/20" onClick={handleSearch}>
-                Try Again
-              </Button>
-            </div>
-          )}
+        {/* Map — shown as soon as user location is known */}
+        {locating && !userLoc && (
+          <div className="flex flex-col items-center text-muted-foreground space-y-3 py-8 animate-in fade-in duration-500">
+            <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
+            <p className="font-mono text-xs uppercase tracking-widest">Getting your location…</p>
+          </div>
+        )}
 
-          {status === "success" && distanceKm !== null && bearing !== null && destLoc && userLoc && (
-            <div className="w-full space-y-8 animate-in slide-in-from-bottom-8 duration-700 fade-in">
-              {/* Massive Distance Display */}
-              <div className="text-center space-y-2">
-                <div className="flex items-baseline justify-center gap-4">
-                  <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
-                    {Math.round(distanceKm * 0.621371).toLocaleString()}
-                  </span>
-                  <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">miles</span>
-                </div>
-                <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
-                  <span>{Math.round(distanceKm).toLocaleString()} kilometers</span>
-                </div>
-              </div>
+        {userLoc && !busy && (
+          <div className="w-full space-y-6 animate-in fade-in duration-500">
+            <DistanceMap
+              userLat={userLoc.lat}
+              userLon={userLoc.lon}
+              destLat={destLoc?.lat}
+              destLon={destLoc?.lon}
+              radiusMiles={parsedRadius}
+            />
 
-              {/* Map */}
-              <DistanceMap
-                userLat={userLoc.lat}
-                userLon={userLoc.lon}
-                destLat={destLoc.lat}
-                destLon={destLoc.lon}
-                radiusMiles={parsedRadius}
-              />
-
-              {/* Detail Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto mt-12">
+            {/* Detail cards — only when destination is known */}
+            {status === "success" && distanceKm !== null && bearing !== null && destLoc && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
                 <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
                   <div className="p-3 rounded-2xl bg-secondary/50 text-muted-foreground">
-                    <Navigation 
-                      className="w-6 h-6 text-primary" 
-                      style={{ transform: `rotate(${bearing}deg)` }} 
+                    <Navigation
+                      className="w-6 h-6 text-primary"
+                      style={{ transform: `rotate(${bearing}deg)` }}
                     />
                   </div>
                   <h3 className="font-medium text-foreground">Bearing</h3>
@@ -263,9 +287,9 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
       </div>
     </div>
