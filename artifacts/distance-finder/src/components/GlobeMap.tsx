@@ -225,7 +225,7 @@ function GlobeInner({
           htmlElement={(d: any) => makeLabel(d.text, d.color)}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonCapColor={() => "rgba(147,197,253,0.07)"}
+          polygonCapColor={() => "rgba(147,197,253,0.14)"}
           polygonSideColor={() => "rgba(0,0,0,0)"}
           polygonStrokeColor={() => "rgba(147,197,253,0.55)"}
           polygonAltitude={0.005}
