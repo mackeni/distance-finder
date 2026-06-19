@@ -115,45 +115,73 @@ export default function Home() {
         </header>
 
         {/* Input Area */}
-        <div className="relative z-10 w-full max-w-lg mx-auto flex gap-2">
-          <div className="relative flex-1 group">
-            <Input
-              ref={inputRef}
-              data-testid="input-destination"
-              type="text"
-              placeholder="e.g. Tokyo, Eiffel Tower, Sydney Opera House..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSearch();
-              }}
-              disabled={status === "locating" || status === "searching"}
-              className="pl-12 pr-10 py-6 text-lg rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow-lg"
-            />
-            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
-            {query && (status === "idle" || status === "success" || status === "error") && (
+        <div className="relative z-10 w-full max-w-lg mx-auto flex flex-col gap-3">
+          {/* Place search row */}
+          <div className="flex gap-2">
+            <div className="relative flex-1 group">
+              <Input
+                ref={inputRef}
+                data-testid="input-destination"
+                type="text"
+                placeholder="e.g. Tokyo, Eiffel Tower, Sydney Opera House..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSearch();
+                }}
+                disabled={status === "locating" || status === "searching"}
+                className="pl-12 pr-10 py-6 text-lg rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow-lg"
+              />
+              <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+              {query && (status === "idle" || status === "success" || status === "error") && (
+                <button
+                  data-testid="button-clear"
+                  onClick={handleClear}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            <Button
+              data-testid="button-search"
+              onClick={handleSearch}
+              disabled={!query.trim() || status === "locating" || status === "searching"}
+              className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
+            >
+              {status === "locating" || status === "searching" ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Search className="w-5 h-5" />
+              )}
+              <span className="hidden sm:inline ml-2">Find</span>
+            </Button>
+          </div>
+
+          {/* Radius row — always visible */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Circle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                data-testid="input-radius"
+                type="number"
+                min="0"
+                placeholder="Radius in miles (optional)"
+                value={radiusInput}
+                onChange={(e) => setRadiusInput(e.target.value)}
+                className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
+              />
+            </div>
+            {radiusInput && (
               <button
-                data-testid="button-clear"
-                onClick={handleClear}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                data-testid="button-clear-radius"
+                onClick={() => setRadiusInput("")}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
-          <Button 
-            data-testid="button-search"
-            onClick={handleSearch}
-            disabled={!query.trim() || status === "locating" || status === "searching"}
-            className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
-          >
-            {status === "locating" || status === "searching" ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Search className="w-5 h-5" />
-            )}
-            <span className="hidden sm:inline ml-2">Find</span>
-          </Button>
         </div>
 
         {/* Status Indicators */}
@@ -195,31 +223,6 @@ export default function Home() {
                 <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
                   <span>{Math.round(distanceKm).toLocaleString()} kilometers</span>
                 </div>
-              </div>
-
-              {/* Radius Input */}
-              <div className="flex items-center gap-3 max-w-sm mx-auto">
-                <div className="relative flex-1">
-                  <Circle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    data-testid="input-radius"
-                    type="number"
-                    min="0"
-                    placeholder="Radius in miles (optional)"
-                    value={radiusInput}
-                    onChange={(e) => setRadiusInput(e.target.value)}
-                    className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50"
-                  />
-                </div>
-                {radiusInput && (
-                  <button
-                    data-testid="button-clear-radius"
-                    onClick={() => setRadiusInput("")}
-                    className="text-muted-foreground hover:text-foreground transition-colors p-1"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
               </div>
 
               {/* Map */}
