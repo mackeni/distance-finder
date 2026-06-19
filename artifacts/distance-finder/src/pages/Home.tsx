@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle } from "lucide-react";
+import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle, LocateFixed } from "lucide-react";
 import { haversineKm, getBearing, getCompassDirection } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,115 +8,143 @@ import DistanceMap from "@/components/DistanceMap";
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
 type Unit = "miles" | "km";
 
+interface LocResult { lat: number; lon: number; name: string }
+
+async function geocode(query: string): Promise<LocResult> {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
+  );
+  if (!res.ok) throw new Error("Failed to reach geocoding service.");
+  const data = await res.json();
+  if (!data || data.length === 0) throw new Error(`Could not find "${query}".`);
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name };
+}
+
 export default function Home() {
   const [status, setStatus] = useState<AppState>("idle");
-  const [query, setQuery] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [unit, setUnit] = useState<Unit>("miles");
 
-  const [userLoc, setUserLoc] = useState<{ lat: number; lon: number } | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [destLoc, setDestLoc] = useState<{ lat: number; lon: number; name: string } | null>(null);
+  // Start location: GPS (default) or custom typed place
+  const [fromInput, setFromInput] = useState("");
+  const [gpsLoc, setGpsLoc] = useState<{ lat: number; lon: number } | null>(null);
+  const [gpsLocating, setGpsLocating] = useState(false);
+  const [customStart, setCustomStart] = useState<LocResult | null>(null);
+
+  // Destination
+  const [toInput, setToInput] = useState("");
+  const [destLoc, setDestLoc] = useState<LocResult | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
-  const [radiusInput, setRadiusInput] = useState<string>("");
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Radius
+  const [radiusInput, setRadiusInput] = useState("");
 
+  const toInputRef = useRef<HTMLInputElement>(null);
+
+  // Silently acquire GPS on mount (used when fromInput is empty)
   useEffect(() => {
     if (!navigator.geolocation) return;
-    setLocating(true);
+    setGpsLocating(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setUserLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-        setLocating(false);
+        setGpsLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setGpsLocating(false);
       },
-      () => setLocating(false),
+      () => setGpsLocating(false),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   }, []);
 
+  // Active start = custom typed place (if provided) or GPS
+  const usingCustomStart = fromInput.trim() !== "";
+  const activeLoc = usingCustomStart ? customStart : gpsLoc;
+  const activeLocLat = activeLoc?.lat;
+  const activeLocLon = activeLoc?.lon;
+  const userLabel = usingCustomStart && customStart
+    ? customStart.name.split(",")[0].trim()
+    : "You are here";
+
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    if (!toInput.trim()) return;
     setStatus("locating");
     setErrorMsg("");
 
     try {
-      let userLat: number;
-      let userLon: number;
+      let startLat: number;
+      let startLon: number;
 
-      if (userLoc) {
-        userLat = userLoc.lat;
-        userLon = userLoc.lon;
+      if (usingCustomStart) {
+        // Geocode the typed "from" place
+        setStatus("searching");
+        const from = await geocode(fromInput.trim());
+        setCustomStart(from);
+        startLat = from.lat;
+        startLon = from.lon;
+      } else if (gpsLoc) {
+        startLat = gpsLoc.lat;
+        startLon = gpsLoc.lon;
         setStatus("searching");
       } else {
+        // GPS not yet acquired — request it now
         const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          if (!navigator.geolocation) {
-            reject(new Error("Geolocation is not supported by your browser."));
-          } else {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 0,
-            });
-          }
+          if (!navigator.geolocation) reject(new Error("Geolocation not supported."));
+          else navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true, timeout: 10000, maximumAge: 0,
+          });
         });
-        userLat = pos.coords.latitude;
-        userLon = pos.coords.longitude;
-        setUserLoc({ lat: userLat, lon: userLon });
+        startLat = pos.coords.latitude;
+        startLon = pos.coords.longitude;
+        setGpsLoc({ lat: startLat, lon: startLon });
         setStatus("searching");
       }
 
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
-      );
-      if (!res.ok) throw new Error("Failed to reach geocoding service.");
-      const data = await res.json();
-      if (!data || data.length === 0)
-        throw new Error(`Could not find a location matching "${query}".`);
+      // Geocode destination
+      const dest = await geocode(toInput.trim());
+      setDestLoc(dest);
 
-      const destLat = parseFloat(data[0].lat);
-      const destLon = parseFloat(data[0].lon);
-      const destName = data[0].display_name;
-
-      setDestLoc({ lat: destLat, lon: destLon, name: destName });
-
-      const dist = haversineKm(userLat, userLon, destLat, destLon);
-      const brng = getBearing(userLat, userLon, destLat, destLon);
-      setDistanceKm(dist);
-      setBearing(brng);
+      setDistanceKm(haversineKm(startLat, startLon, dest.lat, dest.lon));
+      setBearing(getBearing(startLat, startLon, dest.lat, dest.lon));
       setStatus("success");
     } catch (err: any) {
       console.error(err);
-      if (err instanceof GeolocationPositionError) {
-        setErrorMsg("Could not get your location. Please ensure location permissions are granted.");
-      } else {
-        setErrorMsg(err.message || "An unknown error occurred.");
-      }
+      setErrorMsg(
+        err instanceof GeolocationPositionError
+          ? "Could not get your location. Please check location permissions."
+          : err.message || "An unknown error occurred."
+      );
       setStatus("error");
     }
   };
 
   const handleClear = () => {
-    setQuery("");
-    setStatus("idle");
-    setErrorMsg("");
+    setToInput("");
     setDestLoc(null);
     setDistanceKm(null);
     setBearing(null);
-    if (inputRef.current) inputRef.current.focus();
+    setStatus("idle");
+    setErrorMsg("");
+    toInputRef.current?.focus();
   };
 
-  // Radius — interpret entered value in the selected unit, pass miles to map
+  const handleClearFrom = () => {
+    setFromInput("");
+    setCustomStart(null);
+    setDestLoc(null);
+    setDistanceKm(null);
+    setBearing(null);
+    setStatus("idle");
+  };
+
+  // Radius → always convert to miles for the map
   const parsedRadiusRaw =
     radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
-      ? parseFloat(radiusInput)
-      : undefined;
+      ? parseFloat(radiusInput) : undefined;
   const radiusMilesForMap = parsedRadiusRaw
-    ? unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934
+    ? (unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934)
     : undefined;
 
-  // Distance display — primary unit first, secondary below
+  // Distance display
   const distanceMiles = distanceKm != null ? distanceKm * 0.621371 : null;
   const primaryValue  = distanceKm != null ? (unit === "miles" ? distanceMiles! : distanceKm) : null;
   const primaryLabel  = unit === "miles" ? "miles" : "km";
@@ -124,6 +152,8 @@ export default function Home() {
   const secondaryLabel = unit === "miles" ? "kilometers" : "miles";
 
   const busy = status === "locating" || status === "searching";
+  // Show map once we know where the start is and we're not mid-search
+  const showMap = !busy && activeLocLat !== undefined && activeLocLon !== undefined;
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8">
@@ -143,22 +173,46 @@ export default function Home() {
         {/* Input Area */}
         <div className="relative z-10 w-full max-w-lg mx-auto flex flex-col gap-3">
 
-          {/* Place search row */}
+          {/* From row */}
+          <div className="relative group">
+            <Input
+              data-testid="input-from"
+              type="text"
+              placeholder="From: current location"
+              value={fromInput}
+              onChange={(e) => {
+                setFromInput(e.target.value);
+                // Clear resolved custom start if user edits the field
+                if (customStart) { setCustomStart(null); setDestLoc(null); setDistanceKm(null); setBearing(null); setStatus("idle"); }
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") toInputRef.current?.focus(); }}
+              disabled={busy}
+              className="pl-12 pr-10 py-5 text-base rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
+            />
+            <LocateFixed className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${fromInput ? "text-muted-foreground" : "text-primary/60"} group-focus-within:text-primary`} />
+            {fromInput && !busy && (
+              <button onClick={handleClearFrom} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* To row */}
           <div className="flex gap-2">
             <div className="relative flex-1 group">
               <Input
-                ref={inputRef}
+                ref={toInputRef}
                 data-testid="input-destination"
                 type="text"
-                placeholder="e.g. Tokyo, Eiffel Tower, Sydney Opera House..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                placeholder="To: e.g. Tokyo, Eiffel Tower…"
+                value={toInput}
+                onChange={(e) => setToInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
                 disabled={busy}
                 className="pl-12 pr-10 py-6 text-lg rounded-2xl bg-card border-border/50 focus-visible:ring-primary/50 shadow-lg"
               />
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
-              {query && !busy && (
+              {toInput && !busy && (
                 <button
                   data-testid="button-clear"
                   onClick={handleClear}
@@ -171,7 +225,7 @@ export default function Home() {
             <Button
               data-testid="button-search"
               onClick={handleSearch}
-              disabled={!query.trim() || busy}
+              disabled={!toInput.trim() || busy}
               className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
@@ -193,8 +247,6 @@ export default function Home() {
                 className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
               />
             </div>
-
-            {/* Miles / km radio buttons */}
             <div className="flex items-center rounded-xl border border-border/50 bg-card shadow overflow-hidden text-sm font-medium shrink-0">
               {(["miles", "km"] as Unit[]).map((u) => (
                 <label
@@ -205,25 +257,13 @@ export default function Home() {
                       : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                   }`}
                 >
-                  <input
-                    type="radio"
-                    name="unit"
-                    value={u}
-                    checked={unit === u}
-                    onChange={() => setUnit(u)}
-                    className="sr-only"
-                  />
+                  <input type="radio" name="unit" value={u} checked={unit === u} onChange={() => setUnit(u)} className="sr-only" />
                   {u}
                 </label>
               ))}
             </div>
-
             {radiusInput && (
-              <button
-                data-testid="button-clear-radius"
-                onClick={() => setRadiusInput("")}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0"
-              >
+              <button data-testid="button-clear-radius" onClick={() => setRadiusInput("")} className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -237,14 +277,12 @@ export default function Home() {
             <p className="font-mono text-sm uppercase tracking-widest">Acquiring GPS Signal...</p>
           </div>
         )}
-
         {status === "searching" && (
           <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
             <Search className="w-8 h-8 animate-pulse text-primary/70" />
             <p className="font-mono text-sm uppercase tracking-widest">Triangulating Destination...</p>
           </div>
         )}
-
         {status === "error" && (
           <div className="flex flex-col items-center text-destructive space-y-4 p-8 bg-destructive/10 rounded-3xl border border-destructive/20 w-full max-w-lg mx-auto animate-in slide-in-from-bottom-4 duration-300">
             <AlertCircle className="w-10 h-10" />
@@ -270,34 +308,33 @@ export default function Home() {
           </div>
         )}
 
-        {/* Map */}
-        {locating && !userLoc && (
+        {/* Location spinner (GPS mode, map not yet ready) */}
+        {!usingCustomStart && gpsLocating && !gpsLoc && (
           <div className="flex flex-col items-center text-muted-foreground space-y-3 py-8 animate-in fade-in duration-500">
             <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
             <p className="font-mono text-xs uppercase tracking-widest">Getting your location…</p>
           </div>
         )}
 
-        {userLoc && !busy && (
+        {/* Map */}
+        {showMap && (
           <div className="w-full space-y-6 animate-in fade-in duration-500">
             <DistanceMap
-              userLat={userLoc.lat}
-              userLon={userLoc.lon}
+              userLat={activeLocLat!}
+              userLon={activeLocLon!}
               destLat={destLoc?.lat}
               destLon={destLoc?.lon}
               radiusMiles={radiusMilesForMap}
               destName={destLoc?.name.split(",")[0].trim()}
+              userLabel={userLabel}
             />
 
             {/* Detail cards */}
-            {status === "success" && distanceKm !== null && bearing !== null && destLoc && (
+            {status === "success" && distanceKm !== null && bearing !== null && destLoc && activeLoc && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
                 <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
-                  <div className="p-3 rounded-2xl bg-secondary/50 text-muted-foreground">
-                    <Navigation
-                      className="w-6 h-6 text-primary"
-                      style={{ transform: `rotate(${bearing}deg)` }}
-                    />
+                  <div className="p-3 rounded-2xl bg-secondary/50">
+                    <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
                   </div>
                   <h3 className="font-medium text-foreground">Bearing</h3>
                   <p className="text-sm text-muted-foreground font-mono">
@@ -306,14 +343,14 @@ export default function Home() {
                 </div>
 
                 <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center sm:col-span-2">
-                  <div className="p-3 rounded-2xl bg-secondary/50 text-muted-foreground">
+                  <div className="p-3 rounded-2xl bg-secondary/50">
                     <MapPin className="w-6 h-6 text-primary" />
                   </div>
                   <h3 className="font-medium text-foreground line-clamp-1 w-full" title={destLoc.name}>
                     {destLoc.name}
                   </h3>
                   <div className="flex gap-4 text-xs text-muted-foreground font-mono mt-1">
-                    <span>FROM: {userLoc.lat.toFixed(4)}, {userLoc.lon.toFixed(4)}</span>
+                    <span>FROM: {activeLoc.lat.toFixed(4)}, {activeLoc.lon.toFixed(4)}</span>
                     <span className="hidden sm:inline">•</span>
                     <span>TO: {destLoc.lat.toFixed(4)}, {destLoc.lon.toFixed(4)}</span>
                   </div>

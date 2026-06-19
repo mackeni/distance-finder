@@ -125,9 +125,10 @@ interface DistanceMapProps {
   destLon?: number;
   radiusMiles?: number;
   destName?: string;
+  userLabel?: string;
 }
 
-export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles, destName }: DistanceMapProps) {
+export default function DistanceMap({ userLat, userLon, destLat, destLon, radiusMiles, destName, userLabel = "You are here" }: DistanceMapProps) {
   const hasDest = destLat !== undefined && destLon !== undefined;
   const center: [number, number] = hasDest
     ? [(userLat + destLat!) / 2, (userLon + destLon!) / 2]
@@ -186,7 +187,7 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
             offset={[0, -10]}
             className="map-label map-label--user"
           >
-            You are here
+            {userLabel}
           </Tooltip>
         </Marker>
 
