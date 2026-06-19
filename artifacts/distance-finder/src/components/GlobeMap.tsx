@@ -77,16 +77,22 @@ function buildCircleGeometry(lat: number, lon: number, radiusKm: number) {
   // and no 360°-spanning single polygon that MapLibre fills incorrectly.
   const capLat = containsNorthPole ? 89.9 : -89.9;
 
-  // Bowl: the curved ring closed with a 360° horizontal segment at latTop.
-  const bowlRing = [...ring, ring[0]];
+  // Bowl: ring closed with interpolated points along latTop so the closing segment is broken
+  // into short steps — avoids the ambiguous degenerate 360° closing jump.
+  const CLOSE_STEPS = 8;
+  const closingPts: number[][] = [];
+  for (let i = 1; i <= CLOSE_STEPS; i++) {
+    closingPts.push([lonEnd + (lonStart - lonEnd) * (i / CLOSE_STEPS), latTop]);
+  }
+  const bowlRing = [...ring, ...closingPts]; // last closingPt == ring[0], closes the ring
 
-  // Cap rectangle: CCW winding (lower-left → lower-right → upper-right → upper-left → close).
+  // Cap rectangle: CCW winding = BL → TL → TR → BR → close.
   // lonEnd ≈ lonStart − 360 so the rectangle spans the full 360° of longitude.
   const capRing = [
     [lonEnd,   latTop],
-    [lonStart, latTop],
-    [lonStart, capLat],
     [lonEnd,   capLat],
+    [lonStart, capLat],
+    [lonStart, latTop],
     [lonEnd,   latTop],
   ];
 
