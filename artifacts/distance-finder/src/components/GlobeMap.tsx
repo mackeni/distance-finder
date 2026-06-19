@@ -173,11 +173,18 @@ function GlobeInner({
     }
   }, [pickMode, onPickLocation]);
 
+  const handleZoom = useCallback((factor: number) => {
+    if (!globeRef.current) return;
+    const pov = globeRef.current.pointOfView();
+    const newAlt = Math.max(0.02, Math.min(5, pov.altitude * factor));
+    globeRef.current.pointOfView({ ...pov, altitude: newAlt }, 300);
+  }, []);
+
   return (
     <div
       ref={containerRef}
       data-testid="map-container"
-      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black"
+      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black relative"
       style={{ height: 500, cursor: pickMode ? "crosshair" : "default" }}
     >
       {globeWidth > 0 && (
@@ -223,6 +230,24 @@ function GlobeInner({
           enablePointerInteraction
         />
       )}
+      {/* Zoom controls */}
+      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10 pointer-events-auto">
+        <button
+          onClick={() => handleZoom(0.6)}
+          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-lg font-bold flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
+          title="Zoom in"
+        >+</button>
+        <button
+          onClick={() => handleZoom(1 / 0.6)}
+          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-lg font-bold flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
+          title="Zoom out"
+        >−</button>
+        <button
+          onClick={fitCamera}
+          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-xs flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
+          title="Reset view"
+        >⊙</button>
+      </div>
     </div>
   );
 }
