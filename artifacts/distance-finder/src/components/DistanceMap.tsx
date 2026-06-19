@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, Polygon, Circle, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, Circle, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 
 const userIcon = L.divIcon({
@@ -72,36 +72,6 @@ function greatCirclePath(
   return unwrapLons(raw);
 }
 
-// Raw geodesic circle points — no longitude unwrapping. Used for both the
-// fill polygon (raw coords) and the outline polyline (after unwrapping).
-function geodesicCircleRaw(lat: number, lon: number, radiusKm: number, steps = 360): [number, number][] {
-  const R = 6371;
-  const d = radiusKm / R;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const toDeg = (rad: number) => (rad * 180) / Math.PI;
-  const φ1 = toRad(lat);
-  const λ1 = toRad(lon);
-
-  const pts: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const θ = toRad((i * 360) / steps);
-    const φ2 = Math.asin(Math.sin(φ1) * Math.cos(d) + Math.cos(φ1) * Math.sin(d) * Math.cos(θ));
-    const λ2 = λ1 + Math.atan2(
-      Math.sin(θ) * Math.sin(d) * Math.cos(φ1),
-      Math.cos(d) - Math.sin(φ1) * Math.sin(φ2)
-    );
-    pts.push([toDeg(φ2), toDeg(λ2)]);
-  }
-  return pts;
-}
-
-// True if any consecutive longitude jump exceeds 180° (circle crosses ±180°).
-function circleCoversAntimeridian(pts: [number, number][]): boolean {
-  for (let i = 1; i < pts.length; i++) {
-    if (Math.abs(pts[i][1] - pts[i - 1][1]) > 180) return true;
-  }
-  return false;
-}
 
 interface FitBoundsProps {
   userLat: number;
@@ -166,14 +136,8 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
   const arc = hasDest ? greatCirclePath(userLat, userLon, destLat!, destLon!) : null;
 
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
-  // Raw points used for the fill Polygon (no unwrapping = correct closure for
-  // non-antimeridian circles). Unwrapped points used for the outline Polyline.
-  const circleRaw = radiusKm ? geodesicCircleRaw(userLat, userLon, radiusKm) : null;
-  const circleOutline = circleRaw ? unwrapLons(circleRaw) : null;
-  const wrapsFill = circleRaw ? circleCoversAntimeridian(circleRaw) : false;
 
   const lineStyle = { color: "#2563eb", weight: 2.5, opacity: 0.7, dashArray: "6 6" };
-  const circleStyle = { color: "#2563eb", weight: 2, opacity: 0.85 };
 
   // Trigger string changes whenever something meaningful is added/changed
   const trigger = `${userLat},${userLon}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
@@ -200,25 +164,19 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
           noWrap={false}
         />
 
-        {/* Fill: geodesic Polygon aligns exactly with the outline.
-            Falls back to native Circle only when the circle crosses ±180°. */}
-        {circleRaw && !wrapsFill && (
-          <Polygon
-            positions={circleRaw}
-            pathOptions={{ stroke: false, fillColor: "#2563eb", fillOpacity: 0.1 }}
-          />
-        )}
-        {radiusKm && wrapsFill && (
+        {/* Single Circle for both fill and stroke — guaranteed to align */}
+        {radiusKm && (
           <Circle
             center={[userLat, userLon]}
             radius={radiusKm * 1000}
-            pathOptions={{ stroke: false, fillColor: "#2563eb", fillOpacity: 0.1 }}
+            pathOptions={{
+              color: "#2563eb",
+              weight: 2,
+              opacity: 0.85,
+              fillColor: "#2563eb",
+              fillOpacity: 0.1,
+            }}
           />
-        )}
-
-        {/* Geodesic outline — unwrapped lons for smooth antimeridian arc */}
-        {circleOutline && (
-          <Polyline positions={circleOutline} pathOptions={circleStyle} />
         )}
 
         <Marker position={[userLat, userLon]} icon={userIcon}>
