@@ -212,12 +212,12 @@ function GlobeInner({
           atmosphereColor="#6baeff"
           atmosphereAltitude={0.2}
           arcsData={arcsData}
-          arcColor={() => ["rgba(147,197,253,0.35)", "rgba(251,191,36,0.35)"]}
-          arcAltitudeAutoScale={0.35}
-          arcDashLength={0.4}
-          arcDashGap={0.4}
-          arcDashAnimateTime={3500}
-          arcStroke={0.7}
+          arcColor={() => "rgba(147,197,253,0.5)"}
+          arcAltitude={0}
+          arcDashLength={1}
+          arcDashGap={0}
+          arcDashAnimateTime={0}
+          arcStroke={0.8}
           htmlElementsData={htmlLabels}
           htmlLat="lat"
           htmlLng="lng"
