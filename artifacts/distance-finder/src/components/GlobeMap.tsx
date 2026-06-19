@@ -15,16 +15,17 @@ interface GlobeMapProps {
   onPickLocation?: (lat: number, lng: number) => void;
 }
 
-function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
+/**
+ * Generates the raw ring boundary (unwrapped longitudes, no closing duplicate).
+ * i < steps so the last point is NOT a repeat of the first.
+ */
+function geodesicRing(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
   const d = radiusKm / 6371.0088;
   if (d >= Math.PI) return [];
   const latR = (lat * Math.PI) / 180;
   const lonR = (lon * Math.PI) / 180;
-  const containsNorthPole = latR + d > Math.PI / 2;
-  const containsSouthPole = latR - d < -Math.PI / 2;
-
-  const coords: number[][] = [];
-  for (let i = 0; i <= steps; i++) {
+  const ring: number[][] = [];
+  for (let i = 0; i < steps; i++) {
     const θ = (i / steps) * 2 * Math.PI;
     const lat2 = Math.asin(
       Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(θ)
@@ -35,29 +36,68 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
         Math.sin(θ) * Math.sin(d) * Math.cos(latR),
         Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
       );
-    coords.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+    ring.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+  }
+  for (let i = 1; i < ring.length; i++) {
+    while (ring[i][0] - ring[i - 1][0] > 180) ring[i][0] -= 360;
+    while (ring[i][0] - ring[i - 1][0] < -180) ring[i][0] += 360;
+  }
+  return ring;
+}
+
+/**
+ * Builds the fill geometry (Polygon or MultiPolygon) and outline LineString for a
+ * geodesic circle.  For circles that cross a pole, a MultiPolygon is used so the
+ * polar cap is a plain rectangle separate from the bowl — this avoids the 360°-span
+ * artefact and prevents cap seam edges leaking into the outline.
+ */
+function buildCircleGeometry(lat: number, lon: number, radiusKm: number) {
+  const d = radiusKm / 6371.0088;
+  if (d >= Math.PI) return null;
+  const latR = (lat * Math.PI) / 180;
+  const containsNorthPole = latR + d > Math.PI / 2;
+  const containsSouthPole = latR - d < -Math.PI / 2;
+
+  const ring = geodesicRing(lat, lon, radiusKm);
+  if (ring.length < 3) return null;
+
+  const lonStart = ring[0][0];
+  const lonEnd   = ring[ring.length - 1][0]; // ≈ lonStart − 360 for pole-crossing circles
+  const latTop   = ring[0][1];               // reflected latitude at θ = 0
+
+  if (!containsNorthPole && !containsSouthPole) {
+    const closedRing = [...ring, ring[0]];
+    return {
+      fill: { type: "Polygon" as const, coordinates: [closedRing] },
+      line: closedRing,
+    };
   }
 
-  // Unwrap longitudes so they're continuous
-  for (let i = 1; i < coords.length; i++) {
-    while (coords[i][0] - coords[i - 1][0] > 180) coords[i][0] -= 360;
-    while (coords[i][0] - coords[i - 1][0] < -180) coords[i][0] += 360;
-  }
+  // Pole-crossing — split into two non-overlapping polygons so there is no double shading
+  // and no 360°-spanning single polygon that MapLibre fills incorrectly.
+  const capLat = containsNorthPole ? 89.9 : -89.9;
 
-  // For circles that contain a pole the ring traces the boundary correctly on the sphere
-  // but the polar cap (from the ring's reflected top to the pole) is left unshaded on a
-  // Mercator map.  Fix: pop the auto-close point and add explicit cap corners then re-close.
-  if (containsNorthPole || containsSouthPole) {
-    const capLat = containsNorthPole ? 89.9 : -89.9;
-    const closing = coords.pop()!;          // [lonStart − 360, lat_top] — closing duplicate
-    const lonEnd = closing[0];              // longitude on the "west" side after full traverse
-    const lonStart = coords[0][0];          // longitude on the "east" side (θ = 0)
-    coords.push([lonEnd, capLat]);          // up/down to pole cap at west side
-    coords.push([lonStart, capLat]);        // across the cap to east side
-    coords.push([lonStart, coords[0][1]]); // close back to first ring point
-  }
+  // Bowl: the curved ring closed with a 360° horizontal segment at latTop.
+  const bowlRing = [...ring, ring[0]];
 
-  return coords;
+  // Cap rectangle: CCW winding (lower-left → lower-right → upper-right → upper-left → close).
+  // lonEnd ≈ lonStart − 360 so the rectangle spans the full 360° of longitude.
+  const capRing = [
+    [lonEnd,   latTop],
+    [lonStart, latTop],
+    [lonStart, capLat],
+    [lonEnd,   capLat],
+    [lonEnd,   latTop],
+  ];
+
+  return {
+    fill: {
+      type: "MultiPolygon" as const,
+      coordinates: [[bowlRing], [capRing]],
+    },
+    // Outline is only the ring boundary — no cap edges drawn as lines on the map.
+    line: ring,
+  };
 }
 
 function greatCirclePoints(
@@ -195,12 +235,20 @@ function GlobeInner({
     });
 
     // Radius circle
-    const circleCoords =
-      radiusKm && hasUser ? geodesicCircle(userLat!, userLon!, radiusKm) : [];
+    const circleGeom = radiusKm && hasUser
+      ? buildCircleGeometry(userLat!, userLon!, radiusKm)
+      : null;
     (map.getSource("radius") as maplibregl.GeoJSONSource)?.setData({
       type: "Feature",
       properties: {},
-      geometry: { type: "Polygon", coordinates: [circleCoords] },
+      geometry: circleGeom
+        ? circleGeom.fill
+        : { type: "Polygon", coordinates: [[]] },
+    });
+    (map.getSource("radius-ring") as maplibregl.GeoJSONSource)?.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: circleGeom ? circleGeom.line : [] },
     });
 
     // Markers — anchor:'left' so the dot sits exactly on the coordinate
@@ -314,10 +362,16 @@ function GlobeInner({
           "fill-color": "rgba(251,191,36,0.15)",
         },
       });
+
+      // Outline is a separate LineString source so cap seam edges are never drawn as lines.
+      map.addSource("radius-ring", {
+        type: "geojson",
+        data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } },
+      });
       map.addLayer({
-        id: "radius-outline",
+        id: "radius-ring-layer",
         type: "line",
-        source: "radius",
+        source: "radius-ring",
         paint: {
           "line-color": "rgba(251,191,36,0.9)",
           "line-width": 1.5,
