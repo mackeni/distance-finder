@@ -55,6 +55,9 @@ function makeLabel(text: string, color: string): HTMLElement {
     "display:flex",
     "align-items:center",
     "gap:5px",
+    // Shift left by half the dot width and up by half the element height so
+    // the dot centre lands exactly on the coordinate, not the top-left corner.
+    "transform:translate(-4.5px,-50%)",
   ].join(";");
 
   const dot = document.createElement("div");
