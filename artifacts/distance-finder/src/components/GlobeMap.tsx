@@ -17,6 +17,7 @@ interface GlobeMapProps {
 
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
   const d = radiusKm / 6371.0088;
+  if (d >= Math.PI) return []; // covers full globe — skip
   const latR = (lat * Math.PI) / 180;
   const lonR = (lon * Math.PI) / 180;
   const coords: number[][] = [];
@@ -32,6 +33,11 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
         Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
       );
     coords.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+  }
+  // Unwrap longitudes so they're continuous — prevents antimeridian jump artefacts
+  for (let i = 1; i < coords.length; i++) {
+    while (coords[i][0] - coords[i - 1][0] > 180) coords[i][0] -= 360;
+    while (coords[i][0] - coords[i - 1][0] < -180) coords[i][0] += 360;
   }
   return coords;
 }
