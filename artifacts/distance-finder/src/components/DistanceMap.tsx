@@ -104,14 +104,14 @@ function FitBounds({ markerPositions, radiusKm, userLat, userLon }: FitBoundsPro
   useEffect(() => {
     if (!fitted.current && markerPositions.length >= 1) {
       let bounds = L.latLngBounds(markerPositions);
-      // Expand bounds to include the circle if present
       if (radiusKm && userLat !== undefined && userLon !== undefined) {
         const degLat = (radiusKm / 6371) * (180 / Math.PI);
         const degLon = degLat / Math.cos((userLat * Math.PI) / 180);
         bounds = bounds.extend([userLat + degLat, userLon - degLon]);
         bounds = bounds.extend([userLat - degLat, userLon + degLon]);
       }
-      map.fitBounds(bounds, { padding: [48, 48] });
+      // maxZoom: 3 keeps a global perspective so the arc's curvature is visible
+      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 3 });
       fitted.current = true;
     }
   }, [map, markerPositions, radiusKm, userLat, userLon]);
@@ -142,11 +142,11 @@ export default function DistanceMap({ userLat, userLon, destLat, destLon, radius
     <div
       data-testid="map-container"
       className="w-full rounded-3xl overflow-hidden border border-border/50 shadow-xl"
-      style={{ height: "420px" }}
+      style={{ height: "500px" }}
     >
       <MapContainer
         center={center}
-        zoom={4}
+        zoom={2}
         style={{ height: "100%", width: "100%", background: "#f8fafc" }}
         zoomControl={true}
         attributionControl={true}
