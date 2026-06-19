@@ -216,7 +216,7 @@ function GlobeInner({
     try {
       map = new maplibregl.Map({
         container: containerRef.current,
-        style: "https://tiles.openfreemap.org/styles/dark",
+        style: "https://tiles.openfreemap.org/styles/positron",
         center: [15, 30],
         zoom: 1.5,
         minZoom: 0.5,
