@@ -213,9 +213,9 @@ function GlobeInner({
           htmlElement={(d: any) => makeLabel(d.text, d.color)}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonCapColor={() => "rgba(251,191,36,0.14)"}
+          polygonCapColor={() => "rgba(251,191,36,0.28)"}
           polygonSideColor={() => "rgba(0,0,0,0)"}
-          polygonStrokeColor={() => "rgba(251,191,36,0.6)"}
+          polygonStrokeColor={() => "rgba(251,191,36,0.9)"}
           polygonAltitude={0.005}
           enablePointerInteraction
         />
