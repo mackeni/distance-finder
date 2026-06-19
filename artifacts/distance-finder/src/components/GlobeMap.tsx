@@ -1,5 +1,6 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback, Component } from "react";
-import Globe, { GlobeMethods } from "react-globe.gl";
+import React, { useRef, useEffect, useCallback, Component } from "react";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { haversineKm } from "@/lib/geo";
 
 interface GlobeMapProps {
@@ -10,18 +11,6 @@ interface GlobeMapProps {
   radiusMiles?: number;
   destName?: string;
   userLabel?: string;
-}
-
-function hasWebGL(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    return !!(
-      window.WebGLRenderingContext &&
-      (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
-    );
-  } catch {
-    return false;
-  }
 }
 
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128): number[][] {
@@ -45,21 +34,81 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 128)
   return coords;
 }
 
-function makeLabel(text: string, color: string): HTMLElement {
+function greatCirclePoints(
+  lng1: number, lat1: number,
+  lng2: number, lat2: number,
+  steps = 120
+): number[][] {
+  const toR = (d: number) => (d * Math.PI) / 180;
+  const la1 = toR(lat1), lo1 = toR(lng1);
+  const la2 = toR(lat2), lo2 = toR(lng2);
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((la2 - la1) / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2
+  ));
+  if (d === 0) return [[lng1, lat1]];
+  const coords: number[][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const A = Math.sin((1 - f) * d) / Math.sin(d);
+    const B = Math.sin(f * d) / Math.sin(d);
+    const x = A * Math.cos(la1) * Math.cos(lo1) + B * Math.cos(la2) * Math.cos(lo2);
+    const y = A * Math.cos(la1) * Math.sin(lo1) + B * Math.cos(la2) * Math.sin(lo2);
+    const z = A * Math.sin(la1) + B * Math.sin(la2);
+    coords.push([
+      (Math.atan2(y, x) * 180) / Math.PI,
+      (Math.atan2(z, Math.sqrt(x ** 2 + y ** 2)) * 180) / Math.PI,
+    ]);
+  }
+  return coords;
+}
+
+function makeMarkerEl(color: string, text: string): HTMLElement {
   const el = document.createElement("div");
-  el.style.cssText = [
-    "pointer-events:none",
-    "white-space:nowrap",
-    "font-family:system-ui,-apple-system,sans-serif",
+  el.style.cssText =
+    "display:flex;align-items:center;gap:6px;pointer-events:none;";
+
+  const dot = document.createElement("div");
+  dot.style.cssText = [
+    `background:${color}`,
+    "width:10px",
+    "height:10px",
+    "border-radius:50%",
+    "flex-shrink:0",
+    `box-shadow:0 0 8px ${color}`,
+  ].join(";");
+
+  const label = document.createElement("span");
+  label.textContent = text;
+  label.style.cssText = [
+    `color:${color}`,
     "font-size:11px",
     "font-weight:700",
+    "font-family:system-ui,-apple-system,sans-serif",
+    "white-space:nowrap",
     "letter-spacing:0.03em",
-    `color:${color}`,
     "text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 12px rgba(0,0,0,0.8)",
-    "padding-left:10px",
   ].join(";");
-  el.textContent = text;
+
+  el.appendChild(dot);
+  el.appendChild(label);
   return el;
+}
+
+function NoWebGLFallback() {
+  return (
+    <div
+      data-testid="map-container"
+      className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
+      style={{ height: 500 }}
+    >
+      <span className="text-4xl">🌍</span>
+      <p className="text-muted-foreground font-medium">3D globe requires WebGL</p>
+      <p className="text-sm text-muted-foreground/60">
+        Available in Chrome, Firefox, Safari, and most mobile browsers.
+      </p>
+    </div>
+  );
 }
 
 class GlobeErrorBoundary extends Component<
@@ -79,168 +128,185 @@ class GlobeErrorBoundary extends Component<
   }
 }
 
-function NoWebGLFallback() {
-  return (
-    <div
-      data-testid="map-container"
-      className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
-      style={{ height: 500 }}
-    >
-      <span className="text-4xl">🌍</span>
-      <p className="text-muted-foreground font-medium">
-        3D globe requires WebGL
-      </p>
-      <p className="text-sm text-muted-foreground/60">
-        Available in Chrome, Firefox, Safari, and most mobile browsers.
-      </p>
-    </div>
-  );
-}
-
 function GlobeInner({
-  userLat, userLon, destLat, destLon, radiusMiles, destName, userLabel = "You are here",
+  userLat, userLon, destLat, destLon, radiusMiles, destName,
+  userLabel = "You are here",
 }: GlobeMapProps) {
-  const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [globeWidth, setGlobeWidth] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const liveRef = useRef({ userLat, userLon, destLat, destLon, radiusMiles });
-  liveRef.current = { userLat, userLon, destLat, destLon, radiusMiles };
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const readyRef = useRef(false);
+  const [noWebGL, setNoWebGL] = React.useState(false);
 
   const hasUser = userLat !== undefined && userLon !== undefined;
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
+  const updateLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+
+    // Arc
+    const arcCoords =
+      hasUser && hasDest
+        ? greatCirclePoints(userLon!, userLat!, destLon!, destLat!)
+        : [];
+    (map.getSource("arc") as maplibregl.GeoJSONSource)?.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: arcCoords },
+    });
+
+    // Radius circle
+    const circleCoords =
+      radiusKm && hasUser ? geodesicCircle(userLat!, userLon!, radiusKm) : [];
+    (map.getSource("radius") as maplibregl.GeoJSONSource)?.setData({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Polygon", coordinates: [circleCoords] },
+    });
+
+    // Markers
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+    if (hasUser) {
+      markersRef.current.push(
+        new maplibregl.Marker({ element: makeMarkerEl("#93c5fd", userLabel) })
+          .setLngLat([userLon!, userLat!])
+          .addTo(map)
+      );
+    }
+    if (hasDest) {
+      markersRef.current.push(
+        new maplibregl.Marker({
+          element: makeMarkerEl("#fbbf24", destName || "Destination"),
+        })
+          .setLngLat([destLon!, destLat!])
+          .addTo(map)
+      );
+    }
+
+    // Camera
+    if (!hasUser) {
+      map.flyTo({ center: [15, 30], zoom: 1.5, duration: 800 });
+    } else if (hasDest && destLat !== undefined && destLon !== undefined) {
+      const distKm = haversineKm(userLat!, userLon!, destLat, destLon);
+      const padding = 80;
+      const zoom = Math.max(1, Math.min(6, 8 - Math.log2(distKm / 100 + 1)));
+      map.flyTo({
+        center: [(userLon! + destLon) / 2, (userLat! + destLat) / 2],
+        zoom,
+        duration: 800,
+      });
+    } else if (radiusKm) {
+      const radiusDeg = radiusKm / 111.32;
+      map.fitBounds(
+        [
+          [userLon! - radiusDeg * 1.4, userLat! - radiusDeg * 1.4],
+          [userLon! + radiusDeg * 1.4, userLat! + radiusDeg * 1.4],
+        ],
+        { padding: 40, duration: 800 }
+      );
+    } else {
+      map.flyTo({ center: [userLon!, userLat!], zoom: 5, duration: 800 });
+    }
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, radiusKm, destName, userLabel]);
+
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    setGlobeWidth(el.clientWidth);
-    const ro = new ResizeObserver((entries) => setGlobeWidth(entries[0].contentRect.width));
-    ro.observe(el);
-    const stopScroll = (e: WheelEvent) => e.preventDefault();
-    el.addEventListener("wheel", stopScroll, { passive: false });
+    if (!containerRef.current) return;
+
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: "https://tiles.openfreemap.org/styles/dark",
+        center: [15, 30],
+        zoom: 1.5,
+        minZoom: 0.5,
+        maxZoom: 18,
+        attributionControl: false,
+      });
+    } catch {
+      setNoWebGL(true);
+      return;
+    }
+
+    mapRef.current = map;
+
+    map.on("load", () => {
+      try {
+        (map as any).setProjection({ type: "globe" });
+      } catch {}
+
+      map.addSource("arc", {
+        type: "geojson",
+        data: { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } },
+      });
+      map.addLayer({
+        id: "arc-layer",
+        type: "line",
+        source: "arc",
+        paint: {
+          "line-color": "rgba(147,197,253,0.75)",
+          "line-width": 1.5,
+        },
+      });
+
+      map.addSource("radius", {
+        type: "geojson",
+        data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[]] } },
+      });
+      map.addLayer({
+        id: "radius-fill",
+        type: "fill",
+        source: "radius",
+        paint: {
+          "fill-color": "rgba(251,191,36,0.15)",
+        },
+      });
+      map.addLayer({
+        id: "radius-outline",
+        type: "line",
+        source: "radius",
+        paint: {
+          "line-color": "rgba(251,191,36,0.9)",
+          "line-width": 1.5,
+        },
+      });
+
+      readyRef.current = true;
+      updateLayers();
+    });
+
+    map.on("error", (e) => {
+      if (String(e.error).includes("WebGL")) setNoWebGL(true);
+    });
+
     return () => {
-      ro.disconnect();
-      el.removeEventListener("wheel", stopScroll);
+      readyRef.current = false;
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      map.remove();
     };
   }, []);
 
-  const fitCamera = useCallback(() => {
-    if (!globeRef.current) return;
-    const { userLat, userLon, destLat, destLon, radiusMiles } = liveRef.current;
-    const hasUser = userLat !== undefined && userLon !== undefined;
-    const hasDest = destLat !== undefined && destLon !== undefined;
-    const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
-
-    if (!hasUser) {
-      globeRef.current.pointOfView({ lat: 30, lng: 15, altitude: 2.5 }, 800);
-      return;
-    }
-    let lat: number, lng: number, altitude: number;
-    if (hasDest && destLat !== undefined && destLon !== undefined) {
-      lat = (userLat! + destLat) / 2;
-      lng = (userLon! + destLon) / 2;
-      const distKm = haversineKm(userLat!, userLon!, destLat, destLon);
-      altitude = Math.max(0.5, Math.min(3.5, distKm / 5000));
-    } else if (radiusKm) {
-      lat = userLat!; lng = userLon!;
-      altitude = Math.max(0.1, Math.min(2.5, radiusKm / 2000));
-    } else {
-      lat = userLat!; lng = userLon!; altitude = 1.5;
-    }
-    globeRef.current.pointOfView({ lat, lng, altitude }, 800);
-  }, []);
-
-  const trigger = `${userLat ?? ""},${userLon ?? ""}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
-  const prevTrigger = useRef("");
   useEffect(() => {
-    if (trigger === prevTrigger.current) return;
-    prevTrigger.current = trigger;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(fitCamera, 350);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [trigger, fitCamera]);
+    updateLayers();
+  }, [updateLayers]);
 
-  const arcsData = useMemo(
-    () => hasUser && hasDest
-      ? [{ startLat: userLat!, startLng: userLon!, endLat: destLat!, endLng: destLon! }]
-      : [],
-    [hasUser, hasDest, userLat, userLon, destLat, destLon]
-  );
-
-  const htmlLabels = useMemo(() => {
-    const pts: { lat: number; lng: number; text: string; color: string }[] = [];
-    if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
-    if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
-    return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
-
-  const polygonsData = useMemo(() => {
-    if (!radiusKm || !hasUser) return [];
-    return [{ geometry: { type: "Polygon" as const, coordinates: [geodesicCircle(userLat!, userLon!, radiusKm)] } }];
-  }, [hasUser, userLat, userLon, radiusKm]);
+  if (noWebGL) return <NoWebGLFallback />;
 
   return (
     <div
       ref={containerRef}
       data-testid="map-container"
-      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black"
+      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl"
       style={{ height: 500 }}
-    >
-      {globeWidth > 0 && (
-        <Globe
-          ref={globeRef}
-          width={globeWidth}
-          height={500}
-          onGlobeReady={() => {
-            if (globeRef.current) {
-              const controls = globeRef.current.controls();
-              controls.enableZoom = true;
-              controls.zoomSpeed = 1.2;
-              controls.minDistance = 101;
-              controls.maxDistance = 900;
-            }
-            fitCamera();
-          }}
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-          backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
-          atmosphereColor="#6baeff"
-          atmosphereAltitude={0.2}
-          arcsData={arcsData}
-          arcColor={() => "rgba(147,197,253,0.7)"}
-          arcAltitude={0}
-          arcDashLength={1}
-          arcDashGap={0}
-          arcDashAnimateTime={0}
-          arcStroke={0.5}
-          pointsData={htmlLabels}
-          pointLat="lat"
-          pointLng="lng"
-          pointColor="color"
-          pointRadius={0.35}
-          pointAltitude={0}
-          pointResolution={12}
-          htmlElementsData={htmlLabels}
-          htmlLat="lat"
-          htmlLng="lng"
-          htmlAltitude={0}
-          htmlElement={(d: any) => makeLabel(d.text, d.color)}
-          polygonsData={polygonsData}
-          polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonCapColor={() => "rgba(251,191,36,0.28)"}
-          polygonSideColor={() => "rgba(0,0,0,0)"}
-          polygonStrokeColor={() => "rgba(251,191,36,0.9)"}
-          polygonAltitude={0.005}
-          enablePointerInteraction
-        />
-      )}
-    </div>
+    />
   );
 }
 
 export default function GlobeMap(props: GlobeMapProps) {
-  const [webglOk] = useState(() => hasWebGL());
-  if (!webglOk) return <NoWebGLFallback />;
   return (
     <GlobeErrorBoundary>
       <GlobeInner {...props} />
