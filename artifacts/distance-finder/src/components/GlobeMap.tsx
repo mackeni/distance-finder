@@ -194,7 +194,7 @@ function GlobeInner({
           atmosphereAltitude={0.2}
           arcsData={arcsData}
           arcColor={() => "rgba(147,197,253,0.7)"}
-          arcAltitude={0.3}
+          arcAltitude={0}
           arcDashLength={1}
           arcDashGap={0}
           arcDashAnimateTime={0}
