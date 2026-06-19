@@ -212,12 +212,12 @@ function GlobeInner({
           atmosphereColor="#6baeff"
           atmosphereAltitude={0.2}
           arcsData={arcsData}
-          arcColor={() => ["#93c5fd", "#fbbf24"]}
+          arcColor={() => ["rgba(147,197,253,0.35)", "rgba(251,191,36,0.35)"]}
           arcAltitudeAutoScale={0.35}
-          arcDashLength={0.5}
-          arcDashGap={0.3}
-          arcDashAnimateTime={2500}
-          arcStroke={1.5}
+          arcDashLength={0.4}
+          arcDashGap={0.4}
+          arcDashAnimateTime={3500}
+          arcStroke={0.7}
           htmlElementsData={htmlLabels}
           htmlLat="lat"
           htmlLng="lng"
@@ -225,8 +225,8 @@ function GlobeInner({
           htmlElement={(d: any) => makeLabel(d.text, d.color)}
           polygonsData={polygonsData}
           polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonFillColor={() => "rgba(96,165,250,0.15)"}
-          polygonStrokeColor={() => "#93c5fd"}
+          polygonFillColor={() => "rgba(96,165,250,0.04)"}
+          polygonStrokeColor={() => "rgba(147,197,253,0.5)"}
           polygonAltitude={0.005}
           enablePointerInteraction
         />
