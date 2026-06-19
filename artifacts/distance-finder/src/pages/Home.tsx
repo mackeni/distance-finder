@@ -243,7 +243,26 @@ export default function Home() {
             </Button>
           </div>
 
-          {/* Radius + unit toggle row */}
+          {/* Unit toggle — centred, clearly a global setting */}
+          <div className="flex justify-center">
+            <div className="flex items-center rounded-full border border-border/50 bg-card shadow overflow-hidden text-sm font-semibold">
+              {(["miles", "km"] as Unit[]).map((u) => (
+                <label
+                  key={u}
+                  className={`px-5 py-1.5 cursor-pointer transition-colors select-none ${
+                    unit === u
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  <input type="radio" name="unit" value={u} checked={unit === u} onChange={() => setUnit(u)} className="sr-only" />
+                  {u}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Radius row */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Circle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -256,21 +275,6 @@ export default function Home() {
                 onChange={(e) => setRadiusInput(e.target.value)}
                 className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-primary/50 shadow"
               />
-            </div>
-            <div className="flex items-center rounded-xl border border-border/50 bg-card shadow overflow-hidden text-sm font-medium shrink-0">
-              {(["miles", "km"] as Unit[]).map((u) => (
-                <label
-                  key={u}
-                  className={`flex items-center gap-1.5 px-3 py-2 cursor-pointer transition-colors select-none ${
-                    unit === u
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                  }`}
-                >
-                  <input type="radio" name="unit" value={u} checked={unit === u} onChange={() => setUnit(u)} className="sr-only" />
-                  {u}
-                </label>
-              ))}
             </div>
             {radiusInput && (
               <button data-testid="button-clear-radius" onClick={() => setRadiusInput("")} className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0">
