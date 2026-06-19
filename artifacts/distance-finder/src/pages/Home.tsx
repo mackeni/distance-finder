@@ -3,6 +3,7 @@ import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle } from "lu
 import { haversineKm, getBearing, getCompassDirection } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import DistanceMap from "@/components/DistanceMap";
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
 
@@ -188,6 +189,14 @@ export default function Home() {
                   <span>{Math.round(distanceKm).toLocaleString()} Kilometers</span>
                 </div>
               </div>
+
+              {/* Map */}
+              <DistanceMap
+                userLat={userLoc.lat}
+                userLon={userLoc.lon}
+                destLat={destLoc.lat}
+                destLon={destLoc.lon}
+              />
 
               {/* Detail Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto mt-12">
