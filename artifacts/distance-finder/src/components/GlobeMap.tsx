@@ -130,9 +130,12 @@ function buildCircleGeometry(lat: number, lon: number, radiusKm: number) {
 
   if (polygons.length === 0) return null;
 
+  // Use the open ring (no closing segment) for the outline.
+  // closedRing has a ~354° jump back to ring[0] which MapLibre draws as a
+  // horizontal line spanning the whole map — the "wedge" artefact.
   return {
     fill: { type: "MultiPolygon" as const, coordinates: polygons },
-    line: closedRing,
+    line: ring,
   };
 }
 
