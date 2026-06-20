@@ -471,6 +471,9 @@ function GlobeInner({
           polygonSideColor={() => "rgba(0,0,0,0)"}
           polygonStrokeColor={() => "rgba(251,191,36,0.9)"}
           polygonAltitude={0.005}
+          onZoom={(pov: { lat: number; lng: number; altitude: number }) => {
+            if (pov.altitude < MAP_THRESHOLD) switchToMap();
+          }}
           onGlobeClick={handleGlobeClick}
           enablePointerInteraction
         />
