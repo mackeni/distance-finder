@@ -211,14 +211,11 @@ export default function Home() {
     const radiusMeters = Math.round(unit === "miles" ? parsedRadiusRaw * 1609.34 : parsedRadiusRaw * 1000);
     const controller = new AbortController();
     setPlacesLoading(true);
-    // Show places near the circumference: fetch a ring (outer - inner)
-    const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12)); // ~10 mi band, min 1 km
+    // Fetch from outer radius, then filter client-side to the circumference band
+    const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
     const outerR = Math.round(radiusMeters + bandMeters);
-    const innerR = Math.round(Math.max(0, radiusMeters - bandMeters));
-    const ring = `["place"~"^(city|town|village|hamlet)$"](around:RADIUS,${activeLocLat},${activeLocLon})`;
-    const query = innerR > 0
-      ? `[out:json][timeout:15];(node${ring.replace("RADIUS", String(outerR))};) - (node${ring.replace("RADIUS", String(innerR))};);out body 80;`
-      : `[out:json][timeout:15];node${ring.replace("RADIUS", String(outerR))};out body 80;`;
+    const innerR = Math.max(0, radiusMeters - bandMeters);
+    const query = `[out:json][timeout:15];node["place"~"^(city|town|village|hamlet)$"](around:${outerR},${activeLocLat},${activeLocLon});out body 200;`;
     fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -227,14 +224,19 @@ export default function Home() {
     })
       .then((r) => r.json())
       .then((data) => {
-        const places = (data.elements || []).map((el: any) => ({
-          lat: el.lat,
-          lon: el.lon,
-          name: el.tags?.name || el.tags?.["name:en"] || "Place",
-        }));
+        const places = (data.elements || [])
+          .map((el: any) => ({
+            lat: el.lat,
+            lon: el.lon,
+            name: el.tags?.name || el.tags?.["name:en"] || "Place",
+          }))
+          .filter((p: { lat: number; lon: number; name: string }) => {
+            const distM = haversineKm(activeLocLat!, activeLocLon!, p.lat, p.lon) * 1000;
+            return distM >= innerR;
+          });
         setRadiusPlaces(places);
       })
-      .catch(() => {})
+      .catch((err) => console.error("Places fetch error:", err))
       .finally(() => setPlacesLoading(false));
     return () => controller.abort();
   }, [showPlaces, parsedRadiusRaw, activeLocLat, activeLocLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
