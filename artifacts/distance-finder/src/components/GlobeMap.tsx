@@ -247,7 +247,6 @@ function MapView({
       map.addSource("arc", { type: "geojson", data: emptyLine });
       // Layer order: radius fill → radius outline → arc (arc drawn last = on top)
       map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.18 } });
-      map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#fbbf24", "line-width": 2, "line-opacity": 0.9 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#93c5fd", "line-width": 2.5, "line-opacity": 0.9 } });
       setMapLoaded(true);
     });
