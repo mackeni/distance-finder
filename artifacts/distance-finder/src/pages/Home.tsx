@@ -483,7 +483,7 @@ export default function Home() {
 
                   <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-5 rounded-3xl flex flex-col items-center text-center space-y-2">
                     <span className="text-xl font-bold text-muted-foreground">⌒</span>
-                    <h3 className="font-medium text-foreground text-sm">Arc</h3>
+                    <h3 className="font-medium text-foreground text-sm">Distance</h3>
                     <p className="text-sm text-muted-foreground font-mono">
                       {Math.round(primaryValue!).toLocaleString()} {primaryLabel}
                     </p>
