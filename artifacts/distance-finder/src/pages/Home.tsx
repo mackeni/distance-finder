@@ -215,7 +215,7 @@ export default function Home() {
     const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
     const outerR = Math.round(radiusMeters + bandMeters);
     const innerR = Math.max(0, radiusMeters - bandMeters);
-    const query = `[out:json][timeout:15];node["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});out body 200;`;
+    const query = `[out:json][timeout:25];(node["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});way["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});relation["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon}););out center body 200;`;
     fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -226,10 +226,11 @@ export default function Home() {
       .then((data) => {
         const places = (data.elements || [])
           .map((el: any) => ({
-            lat: el.lat,
-            lon: el.lon,
+            lat: el.lat ?? el.center?.lat,
+            lon: el.lon ?? el.center?.lon,
             name: el.tags?.name || el.tags?.["name:en"] || "Place",
           }))
+          .filter((p: any) => p.lat !== undefined && p.lon !== undefined)
           .filter((p: { lat: number; lon: number; name: string }) => {
             const distM = haversineKm(activeLocLat!, activeLocLon!, p.lat, p.lon) * 1000;
             return distM >= innerR;
@@ -433,11 +434,11 @@ export default function Home() {
         {/* Distance result */}
         {status === "success" && primaryValue !== null && bearing !== null && destLoc && (
           <div className="text-center space-y-2 animate-in slide-in-from-bottom-8 duration-700 fade-in">
-            <div className="flex items-baseline justify-center gap-4">
-              <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70">
+            <div className="flex items-baseline justify-center gap-4 overflow-visible">
+              <span className="font-display font-bold tabular-nums tracking-tighter text-6xl sm:text-8xl md:text-9xl text-transparent bg-clip-text bg-gradient-to-b from-foreground to-foreground/70 pb-2 shrink-0">
                 {Math.round(primaryValue).toLocaleString()}
               </span>
-              <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground">{primaryLabel}</span>
+              <span className="text-2xl sm:text-3xl font-semibold text-muted-foreground shrink-0">{primaryLabel}</span>
             </div>
             <div className="flex items-center justify-center text-base sm:text-lg text-muted-foreground/60 font-medium">
               <span>{Math.round(secondaryValue!).toLocaleString()} {secondaryLabel}</span>
