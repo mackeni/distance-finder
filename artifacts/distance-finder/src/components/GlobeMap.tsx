@@ -140,7 +140,6 @@ function MapView({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const placeMarkersRef = useRef<maplibregl.Marker[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const hasUser = userLat !== undefined && userLon !== undefined;
@@ -162,11 +161,26 @@ function MapView({
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.on("load", () => {
+      const emptyFC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
       map.addSource("radius", { type: "geojson", data: emptyPoly });
       map.addSource("arc", { type: "geojson", data: emptyLine });
+      map.addSource("places", { type: "geojson", data: emptyFC });
       map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15 } });
       map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#2563eb", "line-width": 2.5, "line-opacity": 0.85 } });
+      map.addLayer({ id: "places-dot", type: "circle", source: "places", paint: { "circle-radius": 5, "circle-color": "#22c55e", "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" } });
+      map.addLayer({
+        id: "places-label", type: "symbol", source: "places",
+        layout: {
+          "text-field": ["get", "name"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "text-offset": [0, 1.2],
+          "text-anchor": "top",
+          "text-max-width": 8,
+        },
+        paint: { "text-color": "#1e293b", "text-halo-color": "#fff", "text-halo-width": 1.5 },
+      });
       setMapLoaded(true);
     });
     mapRef.current = map;
@@ -271,22 +285,19 @@ function MapView({
       .addTo(map);
   }, [mapLoaded, hasDest, destLat, destLon, destName]);
 
-  // Airport markers
+  // Town markers + labels
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    placeMarkersRef.current.forEach(m => m.remove());
-    placeMarkersRef.current = [];
-    if (!radiusPlaces) return;
-    for (const place of radiusPlaces) {
-      const el = document.createElement("div");
-      el.style.cssText = "width:8px;height:8px;background:#86efac;border:1px solid white;border-radius:50%;opacity:0.85";
-      const marker = new maplibregl.Marker({ element: el })
-        .setLngLat([place.lon, place.lat])
-        .setPopup(new maplibregl.Popup({ offset: 8 }).setText(place.name))
-        .addTo(map);
-      placeMarkersRef.current.push(marker);
-    }
+    const fc: GeoJSON.FeatureCollection = {
+      type: "FeatureCollection",
+      features: (radiusPlaces ?? []).map(p => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+        properties: { name: p.name },
+      })),
+    };
+    (map.getSource("places") as maplibregl.GeoJSONSource).setData(fc);
   }, [mapLoaded, radiusPlaces]);
 
   // Pick mode cursor + click handler
