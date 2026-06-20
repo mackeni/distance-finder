@@ -418,21 +418,24 @@ function GlobeInner({
     [hasUser, hasDest, userLat, userLon, destLat, destLon]
   );
 
-  // labelData: user + dest + airports (airports are few so labels are safe)
+  // labelData: only user + dest — globe text sprites are expensive; airports shown as dots only
   const labelData = useMemo(() => {
     const pts: { lat: number; lng: number; text: string; color: string }[] = [];
     if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
     if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
+    return pts;
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
+
+  // pointData: user + dest + airport dots
+  const pointData = useMemo(() => {
+    const pts: { lat: number; lng: number; color: string }[] = [...labelData];
     if (radiusPlaces) {
       for (const p of radiusPlaces) {
-        pts.push({ lat: p.lat, lng: p.lon, text: p.name, color: "#86efac" });
+        pts.push({ lat: p.lat, lng: p.lon, color: "#86efac" });
       }
     }
     return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName, radiusPlaces]);
-
-  // pointData: same set as labelData (dots rendered separately)
-  const pointData = useMemo(() => labelData, [labelData]);
+  }, [labelData, radiusPlaces]);
 
   const polygonsData = useMemo(() => {
     if (!radiusKm || !hasUser) return [];
