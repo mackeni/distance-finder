@@ -267,14 +267,24 @@ function MapView({
     if (radiusPlaces && radiusPlaces.length > 0) {
       for (const p of radiusPlaces) {
         const el = document.createElement("div");
-        Object.assign(el.style, {
+        el.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;";
+        const dot = document.createElement("div");
+        Object.assign(dot.style, {
           width: "8px", height: "8px", borderRadius: "50%",
           background: "#86efac", border: "1.5px solid white",
-          boxShadow: "0 0 4px rgba(0,0,0,0.4)",
+          boxShadow: "0 0 4px rgba(0,0,0,0.4)", flexShrink: "0",
         });
-        const marker = new maplibregl.Marker({ element: el })
+        const label = document.createElement("div");
+        label.textContent = p.name;
+        Object.assign(label.style, {
+          fontSize: "10px", fontWeight: "600", color: "#86efac",
+          textShadow: "0 1px 3px rgba(0,0,0,0.9)", whiteSpace: "nowrap",
+          pointerEvents: "none", lineHeight: "1",
+        });
+        el.appendChild(dot);
+        el.appendChild(label);
+        const marker = new maplibregl.Marker({ element: el, anchor: "top" })
           .setLngLat([p.lon, p.lat])
-          .setPopup(new maplibregl.Popup({ offset: 10 }).setText(p.name))
           .addTo(map);
         placeMarkersRef.current.push(marker);
       }
@@ -408,24 +418,21 @@ function GlobeInner({
     [hasUser, hasDest, userLat, userLon, destLat, destLon]
   );
 
-  // labelData: only user + dest pins (rendered as 3D text sprites — expensive, keep small)
+  // labelData: user + dest + airports (airports are few so labels are safe)
   const labelData = useMemo(() => {
     const pts: { lat: number; lng: number; text: string; color: string }[] = [];
     if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
     if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
-    return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
-
-  // pointData: all dots including circumference places (dots only, no labels)
-  const pointData = useMemo(() => {
-    const pts: { lat: number; lng: number; color: string }[] = [...labelData];
     if (radiusPlaces) {
       for (const p of radiusPlaces) {
-        pts.push({ lat: p.lat, lng: p.lon, color: "#86efac" });
+        pts.push({ lat: p.lat, lng: p.lon, text: p.name, color: "#86efac" });
       }
     }
     return pts;
-  }, [labelData, radiusPlaces]);
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName, radiusPlaces]);
+
+  // pointData: same set as labelData (dots rendered separately)
+  const pointData = useMemo(() => labelData, [labelData]);
 
   const polygonsData = useMemo(() => {
     if (!radiusKm || !hasUser) return [];
