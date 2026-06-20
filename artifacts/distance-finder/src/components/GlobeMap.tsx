@@ -29,16 +29,13 @@ function hasWebGL(): boolean {
   }
 }
 
-/** Closed geodesic circle ring — coordinates in [lon, lat] order for GeoJSON.
- *  Wound counter-clockwise (GeoJSON exterior ring convention).
- *  Longitudes are unwrapped around the antimeridian so MapLibre renders correctly. */
+/** Raw geodesic circle — clockwise [lon, lat] points, 256 steps.
+ *  Used directly by the 3D globe (react-globe.gl handles winding internally). */
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256): [number, number][] {
   const d = radiusKm / 6371.0088;
   const latR = (lat * Math.PI) / 180;
   const lonR = (lon * Math.PI) / 180;
-  const raw: [number, number][] = [];
-
-  // Trace clockwise (θ increasing = N→E→S→W), then reverse to counter-clockwise for GeoJSON
+  const coords: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {
     const θ = (i / steps) * 2 * Math.PI;
     const lat2 = Math.asin(
@@ -50,21 +47,26 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
         Math.sin(θ) * Math.sin(d) * Math.cos(latR),
         Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
       );
-    raw.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
-  }
-
-  // Reverse so the ring is counter-clockwise (GeoJSON fills the inside, not outside)
-  raw.reverse();
-
-  // Unwrap antimeridian jumps: keep each longitude within 180° of its predecessor
-  const coords: [number, number][] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    let dLon = raw[i][0] - coords[i - 1][0];
-    if (dLon > 180) dLon -= 360;
-    if (dLon < -180) dLon += 360;
-    coords.push([coords[i - 1][0] + dLon, raw[i][1]]);
+    coords.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
   }
   return coords;
+}
+
+/** Geodesic circle ring ready for MapLibre GL GeoJSON:
+ *  counter-clockwise winding (fills inside) + antimeridian-unwrapped longitudes. */
+function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
+  const raw = geodesicCircle(lat, lon, radiusKm);
+  // Reverse to CCW so MapLibre fills the inside of the polygon
+  raw.reverse();
+  // Unwrap antimeridian jumps so consecutive vertices stay within 180° of each other
+  const out: [number, number][] = [raw[0]];
+  for (let i = 1; i < raw.length; i++) {
+    let dLon = raw[i][0] - out[i - 1][0];
+    if (dLon > 180) dLon -= 360;
+    if (dLon < -180) dLon += 360;
+    out.push([out[i - 1][0] + dLon, raw[i][1]]);
+  }
+  return out;
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
@@ -226,7 +228,7 @@ function MapView({
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
     const coords = hasUser && radiusKm
-      ? geodesicCircle(userLat!, userLon!, radiusKm)
+      ? geodesicCircleMapLibre(userLat!, userLon!, radiusKm)
       : [];
     const data: GeoJSON.Feature = {
       type: "Feature",
