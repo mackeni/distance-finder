@@ -408,17 +408,24 @@ function GlobeInner({
     [hasUser, hasDest, userLat, userLon, destLat, destLon]
   );
 
-  const pinData = useMemo(() => {
+  // labelData: only user + dest pins (rendered as 3D text sprites — expensive, keep small)
+  const labelData = useMemo(() => {
     const pts: { lat: number; lng: number; text: string; color: string }[] = [];
     if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
     if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
+    return pts;
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
+
+  // pointData: all dots including circumference places (dots only, no labels)
+  const pointData = useMemo(() => {
+    const pts: { lat: number; lng: number; color: string }[] = [...labelData];
     if (radiusPlaces) {
       for (const p of radiusPlaces) {
-        pts.push({ lat: p.lat, lng: p.lon, text: p.name, color: "#86efac" });
+        pts.push({ lat: p.lat, lng: p.lon, color: "#86efac" });
       }
     }
     return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName, radiusPlaces]);
+  }, [labelData, radiusPlaces]);
 
   const polygonsData = useMemo(() => {
     if (!radiusKm || !hasUser) return [];
@@ -481,14 +488,14 @@ function GlobeInner({
           arcDashGap={0}
           arcDashAnimateTime={0}
           arcStroke={0.5}
-          pointsData={pinData}
+          pointsData={pointData}
           pointLat="lat"
           pointLng="lng"
           pointColor="color"
           pointRadius={0.5}
           pointAltitude={0.01}
           pointResolution={12}
-          labelsData={pinData}
+          labelsData={labelData}
           labelLat="lat"
           labelLng="lng"
           labelText="text"
