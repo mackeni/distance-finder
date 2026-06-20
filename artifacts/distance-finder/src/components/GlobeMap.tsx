@@ -166,7 +166,18 @@ function MapView({
       zoom: initialZoom,
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
-    map.on("load", () => setMapLoaded(true));
+    map.on("load", () => {
+      const emptyLine: GeoJSON.Feature = { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
+      const emptyPoly: GeoJSON.Feature = { type: "Feature", geometry: { type: "Polygon", coordinates: [[]] }, properties: {} };
+      // Add sources
+      map.addSource("radius", { type: "geojson", data: emptyPoly });
+      map.addSource("arc", { type: "geojson", data: emptyLine });
+      // Layer order: radius fill → radius outline → arc (arc drawn last = on top)
+      map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.18 } });
+      map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#fbbf24", "line-width": 2, "line-opacity": 0.9 } });
+      map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#93c5fd", "line-width": 2.5, "line-opacity": 0.9 } });
+      setMapLoaded(true);
+    });
     mapRef.current = map;
     return () => {
       map.remove();
@@ -174,7 +185,7 @@ function MapView({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Arc layer
+  // Arc layer — source already exists after load, just update data
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
@@ -188,22 +199,10 @@ function MapView({
           properties: {},
         }
       : { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
-
-    const src = map.getSource("arc") as maplibregl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData(data);
-    } else {
-      map.addSource("arc", { type: "geojson", data });
-      map.addLayer({
-        id: "arc-line",
-        type: "line",
-        source: "arc",
-        paint: { "line-color": "#93c5fd", "line-width": 2, "line-opacity": 0.85 },
-      });
-    }
+    (map.getSource("arc") as maplibregl.GeoJSONSource).setData(data);
   }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon]);
 
-  // Radius layer
+  // Radius layer — source already exists after load, just update data
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
@@ -215,24 +214,7 @@ function MapView({
       geometry: { type: "Polygon", coordinates: [coords] },
       properties: {},
     };
-    const src = map.getSource("radius") as maplibregl.GeoJSONSource | undefined;
-    if (src) {
-      src.setData(data);
-    } else {
-      map.addSource("radius", { type: "geojson", data });
-      map.addLayer({
-        id: "radius-fill",
-        type: "fill",
-        source: "radius",
-        paint: { "fill-color": "#fbbf24", "fill-opacity": 0.18 },
-      });
-      map.addLayer({
-        id: "radius-outline",
-        type: "line",
-        source: "radius",
-        paint: { "line-color": "#fbbf24", "line-width": 2, "line-opacity": 0.9 },
-      });
-    }
+    (map.getSource("radius") as maplibregl.GeoJSONSource).setData(data);
   }, [mapLoaded, hasUser, userLat, userLon, radiusKm]);
 
   // User marker
@@ -462,7 +444,7 @@ function GlobeInner({
           atmosphereAltitude={0.2}
           arcsData={arcsData}
           arcColor={() => "rgba(147,197,253,0.75)"}
-          arcAltitude={0}
+          arcAltitude={0.008}
           arcDashLength={1}
           arcDashGap={0}
           arcDashAnimateTime={0}
