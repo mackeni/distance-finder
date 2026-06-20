@@ -155,7 +155,7 @@ function MapView({
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+      style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
       center: [15, 30],
       zoom: 2,
       attributionControl: false,
@@ -164,8 +164,9 @@ function MapView({
     map.on("load", () => {
       map.addSource("radius", { type: "geojson", data: emptyPoly });
       map.addSource("arc", { type: "geojson", data: emptyLine });
-      map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.18 } });
-      map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#93c5fd", "line-width": 2.5, "line-opacity": 0.9 } });
+      map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15 } });
+      map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
+      map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#2563eb", "line-width": 2.5, "line-opacity": 0.85 } });
       setMapLoaded(true);
     });
     mapRef.current = map;
@@ -197,7 +198,7 @@ function MapView({
     } else {
       map.flyTo({ center: [userLon!, userLat!], zoom: 8, duration: 800 });
     }
-  }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon]);
+  }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles]);
 
   // Arc layer
   useEffect(() => {
