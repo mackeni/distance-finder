@@ -211,30 +211,26 @@ export default function Home() {
     const radiusMeters = Math.round(unit === "miles" ? parsedRadiusRaw * 1609.34 : parsedRadiusRaw * 1000);
     const controller = new AbortController();
     setPlacesLoading(true);
-    // Fetch from outer radius, then filter client-side to the circumference band
+    // Query OpenDataSoft Geonames dataset — server-side circumference band filter
     const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
-    const outerR = Math.round(radiusMeters + bandMeters);
-    const innerR = Math.max(0, radiusMeters - bandMeters);
-    const query = `[out:json][timeout:25];(node["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});way["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});relation["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon}););out center body 200;`;
-    fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "data=" + encodeURIComponent(query),
-      signal: controller.signal,
-    })
+    const outerKm = (radiusMeters + bandMeters) / 1000;
+    const innerKm = Math.max(0, radiusMeters - bandMeters) / 1000;
+    const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
+    const where = innerKm > 0
+      ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
+      : `distance(coordinates, ${pt}, ${outerKm}km)`;
+    const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
+    const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
+    fetch(url, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
-        const places = (data.elements || [])
-          .map((el: any) => ({
-            lat: el.lat ?? el.center?.lat,
-            lon: el.lon ?? el.center?.lon,
-            name: el.tags?.name || el.tags?.["name:en"] || "Place",
+        const places = (data.results || [])
+          .map((rec: any) => ({
+            lat: rec.coordinates?.lat,
+            lon: rec.coordinates?.lon,
+            name: rec.name || "Place",
           }))
-          .filter((p: any) => p.lat !== undefined && p.lon !== undefined)
-          .filter((p: { lat: number; lon: number; name: string }) => {
-            const distM = haversineKm(activeLocLat!, activeLocLon!, p.lat, p.lon) * 1000;
-            return distM >= innerR;
-          });
+          .filter((p: any) => p.lat !== undefined && p.lon !== undefined);
         setRadiusPlaces(places);
       })
       .catch((err) => console.error("Places fetch error:", err))
