@@ -56,9 +56,7 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
  *  counter-clockwise winding (fills inside) + antimeridian-unwrapped longitudes. */
 function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
   const raw = geodesicCircle(lat, lon, radiusKm);
-  // Reverse to CCW so MapLibre fills the inside of the polygon
-  raw.reverse();
-  // Unwrap antimeridian jumps so consecutive vertices stay within 180° of each other
+  raw.reverse(); // CCW
   const out: [number, number][] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {
     let dLon = raw[i][0] - out[i - 1][0];
@@ -67,6 +65,60 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
     out.push([out[i - 1][0] + dLon, raw[i][1]]);
   }
   return out;
+}
+
+/**
+ * GeoJSON geometry for MapLibre GL.
+ * Returns a simple Polygon for normal circles, or a MultiPolygon when the
+ * circle is large enough to enclose a pole.  In the polar case the second
+ * polygon is a rectangular cap that fills the missing region from the
+ * boundary's extremal latitude to ±90°.
+ */
+function geodesicCircleForMapLibre(
+  lat: number, lon: number, radiusKm: number
+): GeoJSON.Polygon | GeoJSON.MultiPolygon {
+  const d = radiusKm / 6371.0088;
+  const degRadius = (d * 180) / Math.PI;
+  const includesNP = lat + degRadius > 90;
+  const includesSP = lat - degRadius < -90;
+
+  const ring = geodesicCircleMapLibre(lat, lon, radiusKm);
+
+  if (!includesNP && !includesSP) {
+    return { type: "Polygon", coordinates: [ring] };
+  }
+
+  const poleLat = includesNP ? 90 : -90;
+  const latR = (lat * Math.PI) / 180;
+  // Extremal latitude of the boundary ring (θ=0 for NP, θ=π for SP)
+  const sinExt = includesNP
+    ? Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d)
+    : Math.sin(latR) * Math.cos(d) - Math.cos(latR) * Math.sin(d);
+  const extremeLat = (Math.asin(Math.min(1, Math.max(-1, sinExt))) * 180) / Math.PI;
+
+  // Align the cap rectangle with the ring's (possibly unwrapped) coordinate space
+  const minRingLon = Math.min(...ring.map(p => p[0]));
+
+  const capRing: [number, number][] = includesNP
+    ? [
+        [minRingLon,       extremeLat],
+        [minRingLon + 360, extremeLat],
+        [minRingLon + 360, 90],
+        [minRingLon,       90],
+        [minRingLon,       extremeLat],
+      ]
+    : [
+        [minRingLon + 360, extremeLat],
+        [minRingLon,       extremeLat],
+        [minRingLon,       -90],
+        [minRingLon + 360, -90],
+        [minRingLon + 360, extremeLat],
+      ];
+
+  return {
+    type: "MultiPolygon",
+    coordinates: [[ring], [capRing]],
+  };
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
@@ -227,12 +279,12 @@ function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    const coords = hasUser && radiusKm
-      ? geodesicCircleMapLibre(userLat!, userLon!, radiusKm)
-      : [];
+    const geometry: GeoJSON.Geometry = hasUser && radiusKm
+      ? geodesicCircleForMapLibre(userLat!, userLon!, radiusKm)
+      : { type: "Polygon", coordinates: [[]] };
     const data: GeoJSON.Feature = {
       type: "Feature",
-      geometry: { type: "Polygon", coordinates: [coords] },
+      geometry,
       properties: {},
     };
     (map.getSource("radius") as maplibregl.GeoJSONSource).setData(data);
