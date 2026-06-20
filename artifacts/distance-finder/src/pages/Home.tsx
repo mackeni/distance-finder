@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle, LocateFixed } from "lucide-react";
-import { haversineKm, getBearing, getCompassDirection } from "@/lib/geo";
+import { haversineKm, getBearing, getCompassDirection, northSouthKm, northSouthDir, eastWestKm, eastWestDir } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import DistanceMap from "@/components/GlobeMap";
@@ -204,6 +204,14 @@ export default function Home() {
   const primaryLabel  = unit === "miles" ? "miles" : "km";
   const secondaryValue = distanceKm != null ? (unit === "miles" ? distanceKm : distanceMiles!) : null;
   const secondaryLabel = unit === "miles" ? "kilometers" : "miles";
+
+  // N/S and E/W breakdown
+  const nsKm = (activeLoc && destLoc) ? northSouthKm(activeLoc.lat, activeLoc.lon, destLoc.lat) : null;
+  const ewKm = (activeLoc && destLoc) ? eastWestKm(activeLoc.lon, destLoc.lat, destLoc.lon) : null;
+  const nsDirection = (activeLoc && destLoc) ? northSouthDir(activeLoc.lat, destLoc.lat) : null;
+  const ewDirection = (activeLoc && destLoc) ? eastWestDir(activeLoc.lon, destLoc.lon) : null;
+  const nsDisplay = nsKm != null ? (unit === "miles" ? nsKm * 0.621371 : nsKm) : null;
+  const ewDisplay = ewKm != null ? (unit === "miles" ? ewKm * 0.621371 : ewKm) : null;
 
   const busy = status === "locating" || status === "searching";
   // Show map once we know where the start is and we're not mid-search
@@ -427,30 +435,61 @@ export default function Home() {
 
           {/* Detail cards */}
           {status === "success" && distanceKm !== null && bearing !== null && destLoc && activeLoc && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
-              <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
-                <div className="p-3 rounded-2xl bg-secondary/50">
-                  <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
+            <div className="space-y-4 max-w-4xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
+                  <div className="p-3 rounded-2xl bg-secondary/50">
+                    <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
+                  </div>
+                  <h3 className="font-medium text-foreground">Bearing</h3>
+                  <p className="text-sm text-muted-foreground font-mono">
+                    {Math.round(bearing)}° {getCompassDirection(bearing)}
+                  </p>
                 </div>
-                <h3 className="font-medium text-foreground">Bearing</h3>
-                <p className="text-sm text-muted-foreground font-mono">
-                  {Math.round(bearing)}° {getCompassDirection(bearing)}
-                </p>
+
+                <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center sm:col-span-2">
+                  <div className="p-3 rounded-2xl bg-secondary/50">
+                    <MapPin className="w-6 h-6 text-primary" />
+                  </div>
+                  <h3 className="font-medium text-foreground line-clamp-1 w-full" title={destLoc.name}>
+                    {destLoc.name}
+                  </h3>
+                  <div className="flex gap-4 text-xs text-muted-foreground font-mono mt-1">
+                    <span>FROM: {activeLoc.lat.toFixed(4)}, {activeLoc.lon.toFixed(4)}</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span>TO: {destLoc.lat.toFixed(4)}, {destLoc.lon.toFixed(4)}</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center sm:col-span-2">
-                <div className="p-3 rounded-2xl bg-secondary/50">
-                  <MapPin className="w-6 h-6 text-primary" />
+              {/* N/S · E/W breakdown */}
+              {nsDisplay !== null && ewDisplay !== null && (
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-5 rounded-3xl flex flex-col items-center text-center space-y-2">
+                    <span className="text-xl font-bold text-muted-foreground">{nsDirection === "N" ? "↑" : "↓"}</span>
+                    <h3 className="font-medium text-foreground text-sm">{nsDirection === "N" ? "North" : "South"}</h3>
+                    <p className="text-sm text-muted-foreground font-mono">
+                      {Math.round(nsDisplay).toLocaleString()} {primaryLabel}
+                    </p>
+                  </div>
+
+                  <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-5 rounded-3xl flex flex-col items-center text-center space-y-2">
+                    <span className="text-xl font-bold text-muted-foreground">{ewDirection === "E" ? "→" : "←"}</span>
+                    <h3 className="font-medium text-foreground text-sm">{ewDirection === "E" ? "East" : "West"}</h3>
+                    <p className="text-sm text-muted-foreground font-mono">
+                      {Math.round(ewDisplay).toLocaleString()} {primaryLabel}
+                    </p>
+                  </div>
+
+                  <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-5 rounded-3xl flex flex-col items-center text-center space-y-2">
+                    <span className="text-xl font-bold text-muted-foreground">⌒</span>
+                    <h3 className="font-medium text-foreground text-sm">Arc</h3>
+                    <p className="text-sm text-muted-foreground font-mono">
+                      {Math.round(primaryValue!).toLocaleString()} {primaryLabel}
+                    </p>
+                  </div>
                 </div>
-                <h3 className="font-medium text-foreground line-clamp-1 w-full" title={destLoc.name}>
-                  {destLoc.name}
-                </h3>
-                <div className="flex gap-4 text-xs text-muted-foreground font-mono mt-1">
-                  <span>FROM: {activeLoc.lat.toFixed(4)}, {activeLoc.lon.toFixed(4)}</span>
-                  <span className="hidden sm:inline">•</span>
-                  <span>TO: {destLoc.lat.toFixed(4)}, {destLoc.lon.toFixed(4)}</span>
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
