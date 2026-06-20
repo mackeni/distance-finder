@@ -214,6 +214,7 @@ export default function Home() {
     const query = `[out:json][timeout:15];node["place"~"^(city|town|village|hamlet)$"](around:${radiusMeters},${activeLocLat},${activeLocLon});out body 80;`;
     fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: "data=" + encodeURIComponent(query),
       signal: controller.signal,
     })
