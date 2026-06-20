@@ -215,7 +215,7 @@ export default function Home() {
     const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
     const outerR = Math.round(radiusMeters + bandMeters);
     const innerR = Math.max(0, radiusMeters - bandMeters);
-    const query = `[out:json][timeout:15];node["aeroway"="aerodrome"]["name"](around:${outerR},${activeLocLat},${activeLocLon});out body 200;`;
+    const query = `[out:json][timeout:15];node["place"~"city|town"]["name"](around:${outerR},${activeLocLat},${activeLocLon});out body 200;`;
     fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -397,7 +397,7 @@ export default function Home() {
                 onCheckedChange={setShowPlaces}
               />
               <label htmlFor="show-places" className="text-sm text-muted-foreground cursor-pointer select-none flex items-center gap-2">
-                Show airports on circumference
+                Show towns on circumference
                 {placesLoading && <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />}
                 {!placesLoading && showPlaces && radiusPlaces.length > 0 && (
                   <span className="text-xs opacity-50">({radiusPlaces.length})</span>
