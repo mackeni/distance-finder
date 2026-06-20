@@ -3,6 +3,7 @@ import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle, L
 import { haversineKm, getBearing, getCompassDirection, northSouthKm, northSouthDir, eastWestKm, eastWestDir } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import DistanceMap from "@/components/GlobeMap";
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
@@ -40,6 +41,9 @@ export default function Home() {
 
   // Radius
   const [radiusInput, setRadiusInput] = useState("");
+  const [showPlaces, setShowPlaces] = useState(false);
+  const [radiusPlaces, setRadiusPlaces] = useState<{ lat: number; lon: number; name: string }[]>([]);
+  const [placesLoading, setPlacesLoading] = useState(false);
 
   const [pickMode, setPickMode] = useState<PickMode>(null);
 
@@ -198,6 +202,35 @@ export default function Home() {
     ? (unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934)
     : undefined;
 
+  // Fetch places within radius from Overpass when toggle is on
+  useEffect(() => {
+    if (!showPlaces || !parsedRadiusRaw || activeLocLat === undefined || activeLocLon === undefined) {
+      setRadiusPlaces([]);
+      return;
+    }
+    const radiusMeters = Math.round(unit === "miles" ? parsedRadiusRaw * 1609.34 : parsedRadiusRaw * 1000);
+    const controller = new AbortController();
+    setPlacesLoading(true);
+    const query = `[out:json][timeout:15];node["place"~"^(city|town|village|hamlet)$"](around:${radiusMeters},${activeLocLat},${activeLocLon});out body 80;`;
+    fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      body: "data=" + encodeURIComponent(query),
+      signal: controller.signal,
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const places = (data.elements || []).map((el: any) => ({
+          lat: el.lat,
+          lon: el.lon,
+          name: el.tags?.name || el.tags?.["name:en"] || "Place",
+        }));
+        setRadiusPlaces(places);
+      })
+      .catch(() => {})
+      .finally(() => setPlacesLoading(false));
+    return () => controller.abort();
+  }, [showPlaces, parsedRadiusRaw, activeLocLat, activeLocLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Distance display
   const distanceMiles = distanceKm != null ? distanceKm * 0.621371 : null;
   const primaryValue  = distanceKm != null ? (unit === "miles" ? distanceMiles! : distanceKm) : null;
@@ -344,6 +377,24 @@ export default function Home() {
               </button>
             )}
           </div>
+
+          {/* Show places toggle — only visible when radius is set */}
+          {parsedRadiusRaw && (
+            <div className="flex items-center gap-3 px-1">
+              <Switch
+                id="show-places"
+                checked={showPlaces}
+                onCheckedChange={setShowPlaces}
+              />
+              <label htmlFor="show-places" className="text-sm text-muted-foreground cursor-pointer select-none flex items-center gap-2">
+                Show places within radius
+                {placesLoading && <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />}
+                {!placesLoading && showPlaces && radiusPlaces.length > 0 && (
+                  <span className="text-xs opacity-50">({radiusPlaces.length})</span>
+                )}
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Status messages */}
@@ -397,6 +448,7 @@ export default function Home() {
               userLabel={userLabel}
               pickMode={pickMode}
               onPickLocation={handlePickLocation}
+              radiusPlaces={showPlaces ? radiusPlaces : []}
             />
             {/* Pick-mode overlay hint */}
             {pickMode && (

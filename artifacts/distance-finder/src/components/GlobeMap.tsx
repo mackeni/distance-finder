@@ -14,6 +14,7 @@ interface GlobeMapProps {
   userLabel?: string;
   pickMode?: "from" | "to" | null;
   onPickLocation?: (lat: number, lng: number) => void;
+  radiusPlaces?: { lat: number; lon: number; name: string }[];
 }
 
 function hasWebGL(): boolean {
@@ -133,11 +134,13 @@ function MapView({
   destName, userLabel,
   pickMode, onPickLocation,
   onBackToGlobe,
+  radiusPlaces,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const placeMarkersRef = useRef<maplibregl.Marker[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const hasUser = userLat !== undefined && userLon !== undefined;
@@ -255,6 +258,29 @@ function MapView({
     }
   }, [mapLoaded, hasDest, destLat, destLon, destName]);
 
+  // Place markers within radius
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapLoaded || !map) return;
+    placeMarkersRef.current.forEach((m) => m.remove());
+    placeMarkersRef.current = [];
+    if (radiusPlaces && radiusPlaces.length > 0) {
+      for (const p of radiusPlaces) {
+        const el = document.createElement("div");
+        Object.assign(el.style, {
+          width: "8px", height: "8px", borderRadius: "50%",
+          background: "#86efac", border: "1.5px solid white",
+          boxShadow: "0 0 4px rgba(0,0,0,0.4)",
+        });
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([p.lon, p.lat])
+          .setPopup(new maplibregl.Popup({ offset: 10 }).setText(p.name))
+          .addTo(map);
+        placeMarkersRef.current.push(marker);
+      }
+    }
+  }, [mapLoaded, radiusPlaces]);
+
   // Pick mode cursor + click handler
   useEffect(() => {
     const map = mapRef.current;
@@ -295,7 +321,7 @@ function MapView({
 
 function GlobeInner({
   userLat, userLon, destLat, destLon, radiusMiles, destName,
-  userLabel = "You are here", pickMode, onPickLocation,
+  userLabel = "You are here", pickMode, onPickLocation, radiusPlaces,
 }: GlobeMapProps) {
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -386,8 +412,13 @@ function GlobeInner({
     const pts: { lat: number; lng: number; text: string; color: string }[] = [];
     if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
     if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
+    if (radiusPlaces) {
+      for (const p of radiusPlaces) {
+        pts.push({ lat: p.lat, lng: p.lon, text: p.name, color: "#86efac" });
+      }
+    }
     return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
+  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName, radiusPlaces]);
 
   const polygonsData = useMemo(() => {
     if (!radiusKm || !hasUser) return [];
@@ -421,6 +452,7 @@ function GlobeInner({
         pickMode={pickMode}
         onPickLocation={onPickLocation}
         onBackToGlobe={() => setMapMode(false)}
+        radiusPlaces={radiusPlaces}
       />
     );
   }
