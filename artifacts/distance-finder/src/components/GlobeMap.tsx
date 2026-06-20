@@ -182,21 +182,36 @@ function MapView({
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
     if (!hasUser) return;
-    if (hasDest && destLat !== undefined && destLon !== undefined) {
-      map.fitBounds(
-        [[Math.min(userLon!, destLon), Math.min(userLat!, destLat)],
-         [Math.max(userLon!, destLon), Math.max(userLat!, destLat)]],
-        { padding: 80, maxZoom: 10, duration: 800 }
-      );
-    } else if (radiusKm) {
+
+    // Build combined bounding box from all visible features
+    let minLon = userLon!;
+    let maxLon = userLon!;
+    let minLat = userLat!;
+    let maxLat = userLat!;
+
+    if (radiusKm) {
       const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
-      map.fitBounds(
-        [[userLon! - degRadius, userLat! - degRadius],
-         [userLon! + degRadius, userLat! + degRadius]],
-        { padding: 60, maxZoom: 10, duration: 800 }
-      );
-    } else {
+      minLon = Math.min(minLon, userLon! - degRadius);
+      maxLon = Math.max(maxLon, userLon! + degRadius);
+      minLat = Math.max(-85, Math.min(minLat, userLat! - degRadius));
+      maxLat = Math.min(85, Math.max(maxLat, userLat! + degRadius));
+    }
+
+    if (hasDest && destLat !== undefined && destLon !== undefined) {
+      minLon = Math.min(minLon, destLon);
+      maxLon = Math.max(maxLon, destLon);
+      minLat = Math.max(-85, Math.min(minLat, destLat));
+      maxLat = Math.min(85, Math.max(maxLat, destLat));
+    }
+
+    if (minLon === maxLon && minLat === maxLat) {
       map.flyTo({ center: [userLon!, userLat!], zoom: 8, duration: 800 });
+    } else {
+      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+        padding: 60,
+        maxZoom: 10,
+        duration: 800,
+      });
     }
   }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles]);
 
