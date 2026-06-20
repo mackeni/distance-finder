@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, Component } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -303,6 +303,39 @@ function MapView({
   );
 }
 
+class MapErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { crashed: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { crashed: false };
+  }
+  static getDerivedStateFromError() { return { crashed: true }; }
+  render() {
+    if (this.state.crashed) {
+      return (
+        <div
+          data-testid="map-container"
+          className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
+          style={{ height: 500 }}
+        >
+          <span className="text-4xl">🗺️</span>
+          <p className="text-muted-foreground font-medium">Map requires WebGL</p>
+          <p className="text-sm text-muted-foreground/60">
+            Available in Chrome, Firefox, Safari, and most modern browsers.
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function GlobeMap(props: GlobeMapProps) {
-  return <MapView {...props} />;
+  return (
+    <MapErrorBoundary>
+      <MapView {...props} />
+    </MapErrorBoundary>
+  );
 }
