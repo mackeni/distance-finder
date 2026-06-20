@@ -1,8 +1,6 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback, Component } from "react";
-import Globe, { GlobeMethods } from "react-globe.gl";
+import React, { useRef, useEffect, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { haversineKm } from "@/lib/geo";
 
 interface GlobeMapProps {
   userLat?: number;
@@ -17,20 +15,7 @@ interface GlobeMapProps {
   radiusPlaces?: { lat: number; lon: number; name: string }[];
 }
 
-function hasWebGL(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    return !!(
-      window.WebGLRenderingContext &&
-      (canvas.getContext("webgl") || canvas.getContext("experimental-webgl"))
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** Raw geodesic circle — clockwise [lon, lat] points, 256 steps.
- *  Used directly by the 3D globe (react-globe.gl handles winding internally). */
+/** Raw geodesic circle — clockwise [lon, lat] points, 256 steps. */
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256): [number, number][] {
   const d = radiusKm / 6371.0088;
   const latR = (lat * Math.PI) / 180;
@@ -52,11 +37,10 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
   return coords;
 }
 
-/** Geodesic circle ring ready for MapLibre GL GeoJSON:
- *  counter-clockwise winding (fills inside) + antimeridian-unwrapped longitudes. */
+/** CCW + antimeridian-unwrapped ring for MapLibre GL. */
 function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
   const raw = geodesicCircle(lat, lon, radiusKm);
-  raw.reverse(); // CCW
+  raw.reverse();
   const out: [number, number][] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {
     let dLon = raw[i][0] - out[i - 1][0];
@@ -69,10 +53,8 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
 
 /**
  * GeoJSON geometry for MapLibre GL.
- * Returns a simple Polygon for normal circles, or a MultiPolygon when the
- * circle is large enough to enclose a pole.  In the polar case the second
- * polygon is a rectangular cap that fills the missing region from the
- * boundary's extremal latitude to ±90°.
+ * Returns Polygon for normal circles, MultiPolygon when the circle encloses
+ * a pole — adding a rectangular cap from the boundary's extremal latitude to ±90°.
  */
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
@@ -88,15 +70,11 @@ function geodesicCircleForMapLibre(
     return { type: "Polygon", coordinates: [ring] };
   }
 
-  const poleLat = includesNP ? 90 : -90;
   const latR = (lat * Math.PI) / 180;
-  // Extremal latitude of the boundary ring (θ=0 for NP, θ=π for SP)
   const sinExt = includesNP
     ? Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d)
     : Math.sin(latR) * Math.cos(d) - Math.cos(latR) * Math.sin(d);
   const extremeLat = (Math.asin(Math.min(1, Math.max(-1, sinExt))) * 180) / Math.PI;
-
-  // Align the cap rectangle with the ring's (possibly unwrapped) coordinate space
   const minRingLon = Math.min(...ring.map(p => p[0]));
 
   const capRing: [number, number][] = includesNP
@@ -115,10 +93,7 @@ function geodesicCircleForMapLibre(
         [minRingLon + 360, extremeLat],
       ];
 
-  return {
-    type: "MultiPolygon",
-    coordinates: [[ring], [capRing]],
-  };
+  return { type: "MultiPolygon", coordinates: [[ring], [capRing]] };
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
@@ -153,59 +128,14 @@ function greatCirclePoints(
   return pts;
 }
 
-// altitude below this triggers auto-switch to 2D map
-const MAP_THRESHOLD = 0.08;
-
-class GlobeErrorBoundary extends Component<
-  { children: React.ReactNode },
-  { crashed: boolean }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { crashed: false };
-  }
-  static getDerivedStateFromError() {
-    return { crashed: true };
-  }
-  render() {
-    if (this.state.crashed) return <NoWebGLFallback />;
-    return this.props.children;
-  }
-}
-
-function NoWebGLFallback() {
-  return (
-    <div
-      data-testid="map-container"
-      className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
-      style={{ height: 500 }}
-    >
-      <span className="text-4xl">🌍</span>
-      <p className="text-muted-foreground font-medium">3D globe requires WebGL</p>
-      <p className="text-sm text-muted-foreground/60">
-        Available in Chrome, Firefox, Safari, and most mobile browsers.
-      </p>
-    </div>
-  );
-}
-
-// ─── 2D MapLibre view ────────────────────────────────────────────────────────
-
-interface MapViewProps extends GlobeMapProps {
-  centerLat: number;
-  centerLng: number;
-  initialZoom: number;
-  onBackToGlobe: () => void;
-}
+// ─── 2D MapLibre view ─────────────────────────────────────────────────────────
 
 function MapView({
-  centerLat, centerLng, initialZoom,
   userLat, userLon, destLat, destLon, radiusMiles,
   destName, userLabel,
   pickMode, onPickLocation,
-  onBackToGlobe,
   radiusPlaces,
-}: MapViewProps) {
+}: GlobeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
@@ -217,35 +147,23 @@ function MapView({
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
+  const emptyPoly: GeoJSON.Feature = { type: "Feature", geometry: { type: "Polygon", coordinates: [[]] }, properties: {} };
+  const emptyLine: GeoJSON.Feature = { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
+
   // Initialise map once
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          osm: {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors",
-            maxzoom: 19,
-          },
-        },
-        layers: [{ id: "osm-tiles", type: "raster", source: "osm" }],
-      } as maplibregl.StyleSpecification,
-      center: [centerLng, centerLat],
-      zoom: initialZoom,
+      style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+      center: [15, 30],
+      zoom: 2,
+      attributionControl: false,
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.on("load", () => {
-      const emptyLine: GeoJSON.Feature = { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
-      const emptyPoly: GeoJSON.Feature = { type: "Feature", geometry: { type: "Polygon", coordinates: [[]] }, properties: {} };
-      // Add sources
       map.addSource("radius", { type: "geojson", data: emptyPoly });
       map.addSource("arc", { type: "geojson", data: emptyLine });
-      // Layer order: radius fill → radius outline → arc (arc drawn last = on top)
       map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#fbbf24", "fill-opacity": 0.18 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#93c5fd", "line-width": 2.5, "line-opacity": 0.9 } });
       setMapLoaded(true);
@@ -254,109 +172,104 @@ function MapView({
     return () => {
       map.remove();
       mapRef.current = null;
+      setMapLoaded(false);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Arc layer — source already exists after load, just update data
+  // Fly to fit user + dest
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    const data: GeoJSON.Feature = hasUser && hasDest
-      ? {
-          type: "Feature",
-          geometry: {
-            type: "LineString",
-            coordinates: greatCirclePoints(userLat!, userLon!, destLat!, destLon!),
-          },
-          properties: {},
-        }
-      : { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
-    (map.getSource("arc") as maplibregl.GeoJSONSource).setData(data);
+    if (!hasUser) return;
+    if (hasDest && destLat !== undefined && destLon !== undefined) {
+      map.fitBounds(
+        [[Math.min(userLon!, destLon), Math.min(userLat!, destLat)],
+         [Math.max(userLon!, destLon), Math.max(userLat!, destLat)]],
+        { padding: 80, maxZoom: 10, duration: 800 }
+      );
+    } else if (radiusKm) {
+      const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
+      map.fitBounds(
+        [[userLon! - degRadius, userLat! - degRadius],
+         [userLon! + degRadius, userLat! + degRadius]],
+        { padding: 60, maxZoom: 10, duration: 800 }
+      );
+    } else {
+      map.flyTo({ center: [userLon!, userLat!], zoom: 8, duration: 800 });
+    }
   }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon]);
 
-  // Radius layer — source already exists after load, just update data
+  // Arc layer
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapLoaded || !map) return;
+    const coords = hasUser && hasDest
+      ? greatCirclePoints(userLat!, userLon!, destLat!, destLon!)
+      : [];
+    (map.getSource("arc") as maplibregl.GeoJSONSource).setData({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: coords },
+      properties: {},
+    });
+  }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon]);
+
+  // Radius layer
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
     const geometry: GeoJSON.Geometry = hasUser && radiusKm
       ? geodesicCircleForMapLibre(userLat!, userLon!, radiusKm)
       : { type: "Polygon", coordinates: [[]] };
-    const data: GeoJSON.Feature = {
+    (map.getSource("radius") as maplibregl.GeoJSONSource).setData({
       type: "Feature",
       geometry,
       properties: {},
-    };
-    (map.getSource("radius") as maplibregl.GeoJSONSource).setData(data);
+    });
   }, [mapLoaded, hasUser, userLat, userLon, radiusKm]);
 
   // User marker
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    userMarkerRef.current?.remove();
-    if (hasUser) {
-      const el = document.createElement("div");
-      Object.assign(el.style, {
-        width: "12px", height: "12px", borderRadius: "50%",
-        background: "#93c5fd", border: "2px solid white",
-        boxShadow: "0 0 6px rgba(0,0,0,0.5)",
-      });
-      userMarkerRef.current = new maplibregl.Marker({ element: el })
-        .setLngLat([userLon!, userLat!])
-        .setPopup(new maplibregl.Popup({ offset: 12 }).setText(userLabel || "You are here"))
-        .addTo(map);
-    }
+    if (userMarkerRef.current) { userMarkerRef.current.remove(); userMarkerRef.current = null; }
+    if (!hasUser) return;
+    const el = document.createElement("div");
+    el.style.cssText = "width:14px;height:14px;background:#93c5fd;border:2px solid white;border-radius:50%;box-shadow:0 0 6px rgba(147,197,253,0.8)";
+    userMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([userLon!, userLat!])
+      .setPopup(new maplibregl.Popup({ offset: 12 }).setText(userLabel ?? "You are here"))
+      .addTo(map);
   }, [mapLoaded, hasUser, userLat, userLon, userLabel]);
 
-  // Destination marker
+  // Dest marker
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    destMarkerRef.current?.remove();
-    if (hasDest) {
-      const el = document.createElement("div");
-      Object.assign(el.style, {
-        width: "12px", height: "12px", borderRadius: "50%",
-        background: "#fbbf24", border: "2px solid white",
-        boxShadow: "0 0 6px rgba(0,0,0,0.5)",
-      });
-      destMarkerRef.current = new maplibregl.Marker({ element: el })
-        .setLngLat([destLon!, destLat!])
-        .setPopup(new maplibregl.Popup({ offset: 12 }).setText(destName || "Destination"))
-        .addTo(map);
-    }
+    if (destMarkerRef.current) { destMarkerRef.current.remove(); destMarkerRef.current = null; }
+    if (!hasDest) return;
+    const el = document.createElement("div");
+    el.style.cssText = "width:14px;height:14px;background:#fbbf24;border:2px solid white;border-radius:50%;box-shadow:0 0 6px rgba(251,191,36,0.8)";
+    destMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([destLon!, destLat!])
+      .setPopup(new maplibregl.Popup({ offset: 12 }).setText(destName ?? "Destination"))
+      .addTo(map);
   }, [mapLoaded, hasDest, destLat, destLon, destName]);
 
-  // Place markers within radius
+  // Airport markers
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    placeMarkersRef.current.forEach((m) => m.remove());
+    placeMarkersRef.current.forEach(m => m.remove());
     placeMarkersRef.current = [];
-    if (radiusPlaces && radiusPlaces.length > 0) {
-      for (const p of radiusPlaces) {
-        const el = document.createElement("div");
-        el.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;";
-        const dot = document.createElement("div");
-        Object.assign(dot.style, {
-          width: "8px", height: "8px", borderRadius: "50%",
-          background: "#86efac", border: "1.5px solid white",
-          boxShadow: "0 0 4px rgba(0,0,0,0.4)", flexShrink: "0",
-        });
-        const label = document.createElement("div");
-        label.textContent = p.name;
-        Object.assign(label.style, {
-          fontSize: "10px", fontWeight: "600", color: "#86efac",
-          textShadow: "0 1px 3px rgba(0,0,0,0.9)", whiteSpace: "nowrap",
-          pointerEvents: "none", lineHeight: "1",
-        });
-        el.appendChild(dot);
-        el.appendChild(label);
-        const marker = new maplibregl.Marker({ element: el, anchor: "top" })
-          .setLngLat([p.lon, p.lat])
-          .addTo(map);
-        placeMarkersRef.current.push(marker);
-      }
+    if (!radiusPlaces) return;
+    for (const place of radiusPlaces) {
+      const el = document.createElement("div");
+      el.style.cssText = "width:8px;height:8px;background:#86efac;border:1px solid white;border-radius:50%;opacity:0.85";
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([place.lon, place.lat])
+        .setPopup(new maplibregl.Popup({ offset: 8 }).setText(place.name))
+        .addTo(map);
+      placeMarkersRef.current.push(marker);
     }
   }, [mapLoaded, radiusPlaces]);
 
@@ -379,12 +292,6 @@ function MapView({
       style={{ height: 500 }}
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
-      <button
-        onClick={onBackToGlobe}
-        className="absolute top-3 left-3 flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-black/70 border border-white/20 text-white hover:bg-black/90 transition-colors backdrop-blur-sm z-10 select-none"
-      >
-        🌍 Globe view
-      </button>
       {pickMode && (
         <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-4">
           <div className="bg-black/70 text-white text-sm font-semibold px-4 py-2 rounded-full backdrop-blur-sm">
@@ -392,252 +299,10 @@ function MapView({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── 3D Globe view ───────────────────────────────────────────────────────────
-
-function GlobeInner({
-  userLat, userLon, destLat, destLon, radiusMiles, destName,
-  userLabel = "You are here", pickMode, onPickLocation, radiusPlaces,
-}: GlobeMapProps) {
-  const globeRef = useRef<GlobeMethods | undefined>(undefined);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [globeWidth, setGlobeWidth] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const liveRef = useRef({ userLat, userLon, destLat, destLon, radiusMiles });
-  liveRef.current = { userLat, userLon, destLat, destLon, radiusMiles };
-
-  const [mapMode, setMapMode] = useState(false);
-  const [mapCenter, setMapCenter] = useState({ lat: 30, lng: 15, zoom: 5 });
-
-  const hasUser = userLat !== undefined && userLon !== undefined;
-  const hasDest = destLat !== undefined && destLon !== undefined;
-  const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    setGlobeWidth(el.clientWidth);
-    const ro = new ResizeObserver((entries) => setGlobeWidth(entries[0].contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const fitCamera = useCallback(() => {
-    if (!globeRef.current) return;
-    const { userLat, userLon, destLat, destLon, radiusMiles } = liveRef.current;
-    const hasUser = userLat !== undefined && userLon !== undefined;
-    const hasDest = destLat !== undefined && destLon !== undefined;
-    const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
-    if (!hasUser) {
-      globeRef.current.pointOfView({ lat: 30, lng: 15, altitude: 2.5 }, 800);
-      return;
-    }
-    let lat: number, lng: number, altitude: number;
-    if (hasDest && destLat !== undefined && destLon !== undefined) {
-      lat = (userLat! + destLat) / 2;
-      lng = (userLon! + destLon) / 2;
-      const distKm = haversineKm(userLat!, userLon!, destLat, destLon);
-      altitude = Math.max(0.5, Math.min(3.5, distKm / 5000));
-    } else if (radiusKm) {
-      lat = userLat!; lng = userLon!;
-      altitude = Math.max(0.1, Math.min(2.5, radiusKm / 2000));
-    } else {
-      lat = userLat!; lng = userLon!; altitude = 1.5;
-    }
-    globeRef.current.pointOfView({ lat, lng, altitude }, 800);
-  }, []);
-
-  const trigger = `${userLat ?? ""},${userLon ?? ""}|${destLat ?? ""},${destLon ?? ""}|${radiusKm ?? ""}`;
-  const prevTrigger = useRef("");
-  useEffect(() => {
-    if (trigger === prevTrigger.current) return;
-    prevTrigger.current = trigger;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(fitCamera, 350);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [trigger, fitCamera]);
-
-  const switchToMap = useCallback(() => {
-    if (!globeRef.current) return;
-    const pov = globeRef.current.pointOfView();
-    // Convert altitude to approximate MapLibre zoom
-    const zoom = Math.max(4, Math.min(13, Math.round(9 - Math.log2(pov.altitude * 10))));
-    setMapCenter({ lat: pov.lat, lng: pov.lng, zoom });
-    setMapMode(true);
-  }, []);
-
-  const handleZoom = useCallback((factor: number) => {
-    if (!globeRef.current) return;
-    const pov = globeRef.current.pointOfView();
-    const newAlt = Math.max(0.02, Math.min(5, pov.altitude * factor));
-    if (newAlt < MAP_THRESHOLD) {
-      switchToMap();
-      return;
-    }
-    globeRef.current.pointOfView({ ...pov, altitude: newAlt }, 300);
-  }, [switchToMap]);
-
-  const arcsData = useMemo(
-    () => hasUser && hasDest
-      ? [{ startLat: userLat!, startLng: userLon!, endLat: destLat!, endLng: destLon! }]
-      : [],
-    [hasUser, hasDest, userLat, userLon, destLat, destLon]
-  );
-
-  // labelData: only user + dest — globe text sprites are expensive; airports shown as dots only
-  const labelData = useMemo(() => {
-    const pts: { lat: number; lng: number; text: string; color: string }[] = [];
-    if (hasUser) pts.push({ lat: userLat!, lng: userLon!, text: userLabel, color: "#93c5fd" });
-    if (hasDest) pts.push({ lat: destLat!, lng: destLon!, text: destName || "Destination", color: "#fbbf24" });
-    return pts;
-  }, [hasUser, hasDest, userLat, userLon, destLat, destLon, userLabel, destName]);
-
-  // pointData: user + dest + airport dots
-  const pointData = useMemo(() => {
-    const pts: { lat: number; lng: number; color: string }[] = [...labelData];
-    if (radiusPlaces) {
-      for (const p of radiusPlaces) {
-        pts.push({ lat: p.lat, lng: p.lon, color: "#86efac" });
-      }
-    }
-    return pts;
-  }, [labelData, radiusPlaces]);
-
-  const polygonsData = useMemo(() => {
-    if (!radiusKm || !hasUser) return [];
-    return [{
-      geometry: {
-        type: "Polygon" as const,
-        coordinates: [geodesicCircle(userLat!, userLon!, radiusKm)],
-      },
-    }];
-  }, [hasUser, userLat, userLon, radiusKm]);
-
-  const handleGlobeClick = useCallback((
-    coords: { lat: number; lng: number; altitude: number }
-  ) => {
-    if (pickMode && onPickLocation) onPickLocation(coords.lat, coords.lng);
-  }, [pickMode, onPickLocation]);
-
-  if (mapMode) {
-    return (
-      <MapView
-        centerLat={mapCenter.lat}
-        centerLng={mapCenter.lng}
-        initialZoom={mapCenter.zoom}
-        userLat={userLat}
-        userLon={userLon}
-        destLat={destLat}
-        destLon={destLon}
-        radiusMiles={radiusMiles}
-        destName={destName}
-        userLabel={userLabel}
-        pickMode={pickMode}
-        onPickLocation={onPickLocation}
-        onBackToGlobe={() => setMapMode(false)}
-        radiusPlaces={radiusPlaces}
-      />
-    );
-  }
-
-  return (
-    <div
-      ref={containerRef}
-      data-testid="map-container"
-      className="w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl bg-black relative"
-      style={{ height: 500, cursor: pickMode ? "crosshair" : "default" }}
-    >
-      {globeWidth > 0 && (
-        <Globe
-          ref={globeRef}
-          width={globeWidth}
-          height={500}
-          onGlobeReady={fitCamera}
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-          backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
-          atmosphereColor="#6baeff"
-          atmosphereAltitude={0.2}
-          arcsData={arcsData}
-          arcColor={() => "rgba(147,197,253,0.75)"}
-          arcAltitude={0.008}
-          arcDashLength={1}
-          arcDashGap={0}
-          arcDashAnimateTime={0}
-          arcStroke={0.5}
-          pointsData={pointData}
-          pointLat="lat"
-          pointLng="lng"
-          pointColor="color"
-          pointRadius={0.5}
-          pointAltitude={0.01}
-          pointResolution={12}
-          labelsData={labelData}
-          labelLat="lat"
-          labelLng="lng"
-          labelText="text"
-          labelColor={(d: any) => d.color}
-          labelSize={0.6}
-          labelAltitude={0.01}
-          labelResolution={3}
-          labelDotRadius={0}
-          polygonsData={polygonsData}
-          polygonGeoJsonGeometry={(d: any) => d.geometry}
-          polygonCapColor={() => "rgba(251,191,36,0.28)"}
-          polygonSideColor={() => "rgba(0,0,0,0)"}
-          polygonStrokeColor={() => "rgba(251,191,36,0.9)"}
-          polygonAltitude={0.005}
-          onZoom={(pov: { lat: number; lng: number; altitude: number }) => {
-            if (pov.altitude < MAP_THRESHOLD) switchToMap();
-          }}
-          onGlobeClick={handleGlobeClick}
-          enablePointerInteraction
-        />
-      )}
-      {/* Zoom / view controls */}
-      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10 pointer-events-auto">
-        <button
-          onClick={() => handleZoom(0.6)}
-          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-lg font-bold flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
-          title="Zoom in"
-        >+</button>
-        <button
-          onClick={() => handleZoom(1 / 0.6)}
-          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-lg font-bold flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
-          title="Zoom out"
-        >−</button>
-        <button
-          onClick={fitCamera}
-          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-xs flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
-          title="Reset view"
-        >⊙</button>
-        <button
-          onClick={switchToMap}
-          className="w-8 h-8 rounded-full bg-black/60 border border-white/20 text-white text-base flex items-center justify-center hover:bg-black/80 transition-colors backdrop-blur-sm select-none"
-          title="Switch to map view"
-        >🗺</button>
-      </div>
-      {/* Pick-mode overlay hint */}
-      {pickMode && (
-        <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-4">
-          <div className="bg-black/70 text-white text-sm font-semibold px-4 py-2 rounded-full backdrop-blur-sm">
-            Click anywhere on the map to set {pickMode === "from" ? "start" : "destination"}
-          </div>
-        </div>
-      )}
-      {/* Pick buttons */}
     </div>
   );
 }
 
 export default function GlobeMap(props: GlobeMapProps) {
-  const [webglOk] = useState(() => hasWebGL());
-  if (!webglOk) return <NoWebGLFallback />;
-  return (
-    <GlobeErrorBoundary>
-      <GlobeInner {...props} />
-    </GlobeErrorBoundary>
-  );
+  return <MapView {...props} />;
 }
