@@ -147,7 +147,7 @@ function MapView({
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
-  const [radiusLocked, setRadiusLocked] = useState(false);
+  const [radiusLocked, setRadiusLocked] = useState(true);
   const radiusLockedRef = useRef(false);
   radiusLockedRef.current = radiusLocked;
   const toggleLock = useCallback(() => setRadiusLocked(v => !v), []);
