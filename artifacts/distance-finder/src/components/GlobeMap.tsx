@@ -53,15 +53,14 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
 
 /**
  * GeoJSON geometry for MapLibre GL.
- * Returns Polygon for normal circles, MultiPolygon when the circle encloses
- * a pole — adding a rectangular cap that overlaps the ring by CAP_OVERLAP
- * degrees so the shared edge is hidden and no seam line appears.
+ * Returns a simple Polygon for normal circles.
+ * For circles that enclose a pole, builds a single integrated ring that
+ * closes over the pole — avoiding the MultiPolygon seam that is visible
+ * as a colour-change line with semi-transparent fills.
  */
-const CAP_OVERLAP = 15; // degrees — enough to hide the MultiPolygon join seam
-
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
-): GeoJSON.Polygon | GeoJSON.MultiPolygon {
+): GeoJSON.Polygon {
   const d = radiusKm / 6371.0088;
   const degRadius = (d * 180) / Math.PI;
   const includesNP = lat + degRadius > 90;
@@ -73,35 +72,23 @@ function geodesicCircleForMapLibre(
     return { type: "Polygon", coordinates: [ring] };
   }
 
-  const latR = (lat * Math.PI) / 180;
-  const sinExt = includesNP
-    ? Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d)
-    : Math.sin(latR) * Math.cos(d) - Math.cos(latR) * Math.sin(d);
-  const extremeLat = (Math.asin(Math.min(1, Math.max(-1, sinExt))) * 180) / Math.PI;
-  const minRingLon = Math.min(...ring.map(p => p[0]));
+  // Polar case: integrate the cap into the ring as a single polygon.
+  // The unwrapped ring starts and ends at the same geographic point but
+  // the end longitude differs by ≈±360° (one full traversal).
+  // We close the gap over the pole with two extra segments.
+  const poleLat = includesNP ? 90 : -90;
+  const openRing = ring.slice(0, ring.length - 1); // drop closing duplicate
+  const firstLon = openRing[0][0];
+  const lastLon  = openRing[openRing.length - 1][0];
 
-  // Extend the cap past extremeLat so it overlaps the ring — eliminates the seam
-  const capEdge = includesNP
-    ? extremeLat - CAP_OVERLAP
-    : extremeLat + CAP_OVERLAP;
+  const integratedRing: [number, number][] = [
+    ...openRing,
+    [lastLon,  poleLat], // ascend to pole at current longitude
+    [firstLon, poleLat], // traverse across pole back to start longitude
+    openRing[0],         // close the ring
+  ];
 
-  const capRing: [number, number][] = includesNP
-    ? [
-        [minRingLon,       capEdge],
-        [minRingLon + 360, capEdge],
-        [minRingLon + 360, 90],
-        [minRingLon,       90],
-        [minRingLon,       capEdge],
-      ]
-    : [
-        [minRingLon + 360, capEdge],
-        [minRingLon,       capEdge],
-        [minRingLon,       -90],
-        [minRingLon + 360, -90],
-        [minRingLon + 360, capEdge],
-      ];
-
-  return { type: "MultiPolygon", coordinates: [[ring], [capRing]] };
+  return { type: "Polygon", coordinates: [integratedRing] };
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
