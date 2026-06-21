@@ -210,40 +210,43 @@ export default function Home() {
     }
     const radiusMeters = Math.round(unit === "miles" ? parsedRadiusRaw * 1609.34 : parsedRadiusRaw * 1000);
     const controller = new AbortController();
-    setPlacesLoading(true);
-    // Query OpenDataSoft Geonames dataset — server-side circumference band filter
-    const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
-    const outerKm = (radiusMeters + bandMeters) / 1000;
-    const innerKm = Math.max(0, radiusMeters - bandMeters) / 1000;
-    const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
-    const where = (innerKm > 0
-      ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
-      : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 10000`;
-    const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
-    const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
-    fetch(url, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        // One town per 1° bearing sector — keep highest-population town in each sector
-        const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
-        (data.results || []).forEach((rec: any) => {
-          const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
-          if (lat2 === undefined || lon2 === undefined) return;
-          const dLon = (lon2 - activeLocLon!) * Math.PI / 180;
-          const lat1r = activeLocLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
-          const bearing = (Math.atan2(
-            Math.sin(dLon) * Math.cos(lat2r),
-            Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
-          ) * 180 / Math.PI + 360) % 360;
-          const sector = Math.floor(bearing);
-          // Results ordered by population desc — first seen per sector wins
-          if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
-        });
-        setRadiusPlaces([...byDegree.values()]);
-      })
-      .catch((err) => console.error("Places fetch error:", err))
-      .finally(() => setPlacesLoading(false));
-    return () => controller.abort();
+    // Debounce: wait 600 ms after the last change (e.g. rapid pinch) before fetching
+    const timer = setTimeout(() => {
+      setPlacesLoading(true);
+      // Query OpenDataSoft Geonames dataset — server-side circumference band filter
+      const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
+      const outerKm = (radiusMeters + bandMeters) / 1000;
+      const innerKm = Math.max(0, radiusMeters - bandMeters) / 1000;
+      const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
+      const where = (innerKm > 0
+        ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
+        : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 10000`;
+      const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
+      const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
+      fetch(url, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((data) => {
+          // One town per 1° bearing sector — keep highest-population town in each sector
+          const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
+          (data.results || []).forEach((rec: any) => {
+            const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
+            if (lat2 === undefined || lon2 === undefined) return;
+            const dLon = (lon2 - activeLocLon!) * Math.PI / 180;
+            const lat1r = activeLocLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
+            const bearing = (Math.atan2(
+              Math.sin(dLon) * Math.cos(lat2r),
+              Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
+            ) * 180 / Math.PI + 360) % 360;
+            const sector = Math.floor(bearing);
+            // Results ordered by population desc — first seen per sector wins
+            if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
+          });
+          setRadiusPlaces([...byDegree.values()]);
+        })
+        .catch((err) => { if ((err as any)?.name !== "AbortError") console.error("Places fetch error:", err); })
+        .finally(() => setPlacesLoading(false));
+    }, 600);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [showPlaces, parsedRadiusRaw, activeLocLat, activeLocLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Distance display
