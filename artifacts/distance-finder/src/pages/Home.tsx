@@ -240,9 +240,17 @@ export default function Home() {
           const allRecords = responses.flatMap((d) => d.results || []);
           // Sort all records by population desc so highest-pop town wins each sector
           allRecords.sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+          // Dedup by name first (Geonames has multiple entries per city with slightly different coords)
+          const seenNames = new Set<string>();
+          const uniqueRecords = allRecords.filter((rec: any) => {
+            const key = (rec.name || "").toLowerCase().trim();
+            if (!key || seenNames.has(key)) return false;
+            seenNames.add(key);
+            return true;
+          });
           // One town per 1° bearing sector
           const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
-          allRecords.forEach((rec: any) => {
+          uniqueRecords.forEach((rec: any) => {
             const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
             if (lat2 === undefined || lon2 === undefined) return;
             const dLon = (lon2 - radiusCenterLon!) * Math.PI / 180;
