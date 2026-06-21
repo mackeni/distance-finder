@@ -41,10 +41,10 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
   return coords;
 }
 
-/** CCW + antimeridian-unwrapped ring for MapLibre GL. */
+/** CCW + antimeridian-unwrapped ring for MapLibre GL (use as outer/fill ring). */
 function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
   const raw = geodesicCircle(lat, lon, radiusKm);
-  raw.reverse();
+  raw.reverse(); // CW → CCW
   const out: [number, number][] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {
     let dLon = raw[i][0] - out[i - 1][0];
@@ -55,44 +55,88 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
   return out;
 }
 
+/** CW + antimeridian-unwrapped ring — use as a hole ring inside a polygon. */
+function geodesicCircleMapLibreCW(lat: number, lon: number, radiusKm: number): [number, number][] {
+  const raw = geodesicCircle(lat, lon, radiusKm); // already CW
+  const out: [number, number][] = [raw[0]];
+  for (let i = 1; i < raw.length; i++) {
+    let dLon = raw[i][0] - out[i - 1][0];
+    if (dLon > 180) dLon -= 360;
+    if (dLon < -180) dLon += 360;
+    out.push([out[i - 1][0] + dLon, raw[i][1]]);
+  }
+  return out;
+}
+
+/** World-spanning outer ring (CCW) — used as the fill base for large circles. */
+const WORLD_RING: [number, number][] = [
+  [-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90],
+];
+
 /**
- * GeoJSON geometry for MapLibre GL.
- * Returns a simple Polygon for normal circles.
- * For circles that enclose a pole, builds a single integrated ring that
- * closes over the pole — avoiding the MultiPolygon seam that is visible
- * as a colour-change line with semi-transparent fills.
+ * Integrate a polar cap into a ring by adding two pole-crossing segments.
+ * Works for both CCW outer rings and CW hole rings.
+ */
+function withPolarCap(ring: [number, number][], poleLat: number): [number, number][] {
+  const open = ring.slice(0, ring.length - 1);
+  const firstLon = open[0][0];
+  const lastLon  = open[open.length - 1][0];
+  return [...open, [lastLon, poleLat], [firstLon, poleLat], open[0]];
+}
+
+/**
+ * GeoJSON Polygon for MapLibre GL that handles all radius sizes correctly.
+ *
+ * • radius ≤ 90° arc  → simple polygon (or pole-capped single ring)
+ * • radius > 90° arc  → world polygon with antipodal complement cap as a hole
+ *   (the circle covers >hemisphere; shade = world minus the antipodal cap)
+ * • radius ≥ 180° arc → full world rectangle
  */
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
 ): GeoJSON.Polygon {
-  const d = radiusKm / 6371.0088;
+  const d = radiusKm / 6371.0088; // angular radius in radians
+
+  // Entire globe
+  if (d >= Math.PI) {
+    return { type: "Polygon", coordinates: [WORLD_RING] };
+  }
+
   const degRadius = (d * 180) / Math.PI;
+
+  // Large circle (> hemisphere): shade = world minus antipodal complement cap
+  if (d > Math.PI / 2) {
+    const antipodeLat = -lat;
+    const antipodeLon = lon >= 0 ? lon - 180 : lon + 180;
+    const complementKm = (Math.PI - d) * 6371.0088;
+    const compDegRadius = 180 - degRadius;
+
+    let hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
+
+    // Does the complement cap touch a pole?
+    const compNP = antipodeLat + compDegRadius > 90;
+    const compSP = antipodeLat - compDegRadius < -90;
+    if (compNP || compSP) {
+      hole = withPolarCap(hole, compNP ? 90 : -90);
+    }
+
+    return { type: "Polygon", coordinates: [WORLD_RING, hole] };
+  }
+
+  // Normal circle (d ≤ π/2)
+  const ring = geodesicCircleMapLibre(lat, lon, radiusKm);
   const includesNP = lat + degRadius > 90;
   const includesSP = lat - degRadius < -90;
-
-  const ring = geodesicCircleMapLibre(lat, lon, radiusKm);
 
   if (!includesNP && !includesSP) {
     return { type: "Polygon", coordinates: [ring] };
   }
 
-  // Polar case: integrate the cap into the ring as a single polygon.
-  // The unwrapped ring starts and ends at the same geographic point but
-  // the end longitude differs by ≈±360° (one full traversal).
-  // We close the gap over the pole with two extra segments.
-  const poleLat = includesNP ? 90 : -90;
-  const openRing = ring.slice(0, ring.length - 1); // drop closing duplicate
-  const firstLon = openRing[0][0];
-  const lastLon  = openRing[openRing.length - 1][0];
-
-  const integratedRing: [number, number][] = [
-    ...openRing,
-    [lastLon,  poleLat], // ascend to pole at current longitude
-    [firstLon, poleLat], // traverse across pole back to start longitude
-    openRing[0],         // close the ring
-  ];
-
-  return { type: "Polygon", coordinates: [integratedRing] };
+  // Pole-capped single ring
+  return {
+    type: "Polygon",
+    coordinates: [withPolarCap(ring, includesNP ? 90 : -90)],
+  };
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
