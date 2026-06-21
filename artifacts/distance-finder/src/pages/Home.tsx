@@ -248,7 +248,8 @@ export default function Home() {
             seenNames.add(key);
             return true;
           });
-          // One town per 1° bearing sector
+          // One town per 2° bearing sector (1° was too fine — adjacent sectors overlap visually)
+          const SECTOR_DEG = 2;
           const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
           uniqueRecords.forEach((rec: any) => {
             const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
@@ -259,7 +260,7 @@ export default function Home() {
               Math.sin(dLon) * Math.cos(lat2r),
               Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
             ) * 180 / Math.PI + 360) % 360;
-            const sector = Math.floor(bearing);
+            const sector = Math.floor(bearing / SECTOR_DEG);
             if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
           });
           setRadiusPlaces([...byDegree.values()]);
