@@ -41,6 +41,7 @@ export default function Home() {
 
   // Radius
   const [radiusInput, setRadiusInput] = useState("");
+  const [radiusCenter, setRadiusCenter] = useState<"from" | "to">("from");
   const [showPlaces, setShowPlaces] = useState(false);
   const [radiusPlaces, setRadiusPlaces] = useState<{ lat: number; lon: number; name: string }[]>([]);
   const [placesLoading, setPlacesLoading] = useState(false);
@@ -202,9 +203,14 @@ export default function Home() {
     ? (unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934)
     : undefined;
 
+  // Radius centre coordinates
+  const hasDest = destLoc !== null;
+  const radiusCenterLat = radiusCenter === "to" && hasDest ? destLoc!.lat : activeLocLat;
+  const radiusCenterLon = radiusCenter === "to" && hasDest ? destLoc!.lon : activeLocLon;
+
   // Fetch towns near the radius circumference from OpenDataSoft Geonames
   useEffect(() => {
-    if (!showPlaces || !parsedRadiusRaw || activeLocLat === undefined || activeLocLon === undefined) {
+    if (!showPlaces || !parsedRadiusRaw || radiusCenterLat === undefined || radiusCenterLon === undefined) {
       setRadiusPlaces([]);
       return;
     }
@@ -217,7 +223,7 @@ export default function Home() {
       const bandMeters = Math.min(16093, Math.max(1000, radiusMeters * 0.12));
       const outerKm = (radiusMeters + bandMeters) / 1000;
       const innerKm = Math.max(0, radiusMeters - bandMeters) / 1000;
-      const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
+      const pt = `geom'POINT(${radiusCenterLon} ${radiusCenterLat})'`;
       const where = (innerKm > 0
         ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
         : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 10000`;
@@ -231,8 +237,8 @@ export default function Home() {
           (data.results || []).forEach((rec: any) => {
             const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
             if (lat2 === undefined || lon2 === undefined) return;
-            const dLon = (lon2 - activeLocLon!) * Math.PI / 180;
-            const lat1r = activeLocLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
+            const dLon = (lon2 - radiusCenterLon!) * Math.PI / 180;
+            const lat1r = radiusCenterLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
             const bearing = (Math.atan2(
               Math.sin(dLon) * Math.cos(lat2r),
               Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
@@ -247,7 +253,7 @@ export default function Home() {
         .finally(() => setPlacesLoading(false));
     }, 600);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [showPlaces, parsedRadiusRaw, activeLocLat, activeLocLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showPlaces, parsedRadiusRaw, radiusCenterLat, radiusCenterLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Distance display
   const distanceMiles = distanceKm != null ? distanceKm * 0.621371 : null;
@@ -394,6 +400,27 @@ export default function Home() {
             )}
           </div>
 
+          {/* Radius centre toggle — only when radius is set and a destination exists */}
+          {parsedRadiusRaw && hasDest && (
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-sm text-muted-foreground">Centre on</span>
+              <div className="flex rounded-lg overflow-hidden border border-border/50 text-sm">
+                <button
+                  onClick={() => setRadiusCenter("from")}
+                  className={`px-3 py-1 transition-colors ${radiusCenter === "from" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground"}`}
+                >
+                  start
+                </button>
+                <button
+                  onClick={() => setRadiusCenter("to")}
+                  className={`px-3 py-1 transition-colors ${radiusCenter === "to" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:text-foreground"}`}
+                >
+                  end
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Show places toggle — only visible when radius is set */}
           {parsedRadiusRaw && (
             <div className="flex items-center gap-3 px-1">
@@ -460,6 +487,8 @@ export default function Home() {
               destLat={destLoc?.lat}
               destLon={destLoc?.lon}
               radiusMiles={radiusMilesForMap}
+              radiusCenterLat={radiusCenterLat}
+              radiusCenterLon={radiusCenterLon}
               destName={destLoc?.name.split(",")[0].trim()}
               userLabel={userLabel}
               pickMode={pickMode}
