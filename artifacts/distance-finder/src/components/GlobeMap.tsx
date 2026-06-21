@@ -54,8 +54,11 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
 /**
  * GeoJSON geometry for MapLibre GL.
  * Returns Polygon for normal circles, MultiPolygon when the circle encloses
- * a pole — adding a rectangular cap from the boundary's extremal latitude to ±90°.
+ * a pole — adding a rectangular cap that overlaps the ring by CAP_OVERLAP
+ * degrees so the shared edge is hidden and no seam line appears.
  */
+const CAP_OVERLAP = 15; // degrees — enough to hide the MultiPolygon join seam
+
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
 ): GeoJSON.Polygon | GeoJSON.MultiPolygon {
@@ -77,20 +80,25 @@ function geodesicCircleForMapLibre(
   const extremeLat = (Math.asin(Math.min(1, Math.max(-1, sinExt))) * 180) / Math.PI;
   const minRingLon = Math.min(...ring.map(p => p[0]));
 
+  // Extend the cap past extremeLat so it overlaps the ring — eliminates the seam
+  const capEdge = includesNP
+    ? extremeLat - CAP_OVERLAP
+    : extremeLat + CAP_OVERLAP;
+
   const capRing: [number, number][] = includesNP
     ? [
-        [minRingLon,       extremeLat],
-        [minRingLon + 360, extremeLat],
+        [minRingLon,       capEdge],
+        [minRingLon + 360, capEdge],
         [minRingLon + 360, 90],
         [minRingLon,       90],
-        [minRingLon,       extremeLat],
+        [minRingLon,       capEdge],
       ]
     : [
-        [minRingLon + 360, extremeLat],
-        [minRingLon,       extremeLat],
+        [minRingLon + 360, capEdge],
+        [minRingLon,       capEdge],
         [minRingLon,       -90],
         [minRingLon + 360, -90],
-        [minRingLon + 360, extremeLat],
+        [minRingLon + 360, capEdge],
       ];
 
   return { type: "MultiPolygon", coordinates: [[ring], [capRing]] };
