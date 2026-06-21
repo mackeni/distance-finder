@@ -202,7 +202,7 @@ export default function Home() {
     ? (unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934)
     : undefined;
 
-  // Fetch places within radius from Overpass when toggle is on
+  // Fetch towns near the radius circumference from OpenDataSoft Geonames
   useEffect(() => {
     if (!showPlaces || !parsedRadiusRaw || activeLocLat === undefined || activeLocLon === undefined) {
       setRadiusPlaces([]);
@@ -225,8 +225,8 @@ export default function Home() {
       .then((r) => r.json())
       .then((data) => {
         // One town per 1° bearing sector — keep highest-population town in each sector
-        const byDegree = new Map<number, { lat: number; lon: number; name: string; idx: number }>();
-        (data.results || []).forEach((rec: any, idx: number) => {
+        const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
+        (data.results || []).forEach((rec: any) => {
           const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
           if (lat2 === undefined || lon2 === undefined) return;
           const dLon = (lon2 - activeLocLon!) * Math.PI / 180;
@@ -236,8 +236,8 @@ export default function Home() {
             Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
           ) * 180 / Math.PI + 360) % 360;
           const sector = Math.floor(bearing);
-          // Results are ordered by population desc — first seen per sector wins
-          if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place", idx });
+          // Results ordered by population desc — first seen per sector wins
+          if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
         });
         setRadiusPlaces([...byDegree.values()]);
       })
@@ -262,8 +262,6 @@ export default function Home() {
   const ewDisplay = ewKm != null ? (unit === "miles" ? ewKm * 0.621371 : ewKm) : null;
 
   const busy = status === "locating" || status === "searching";
-  // Show map once we know where the start is and we're not mid-search
-  const showMap = !busy && activeLocLat !== undefined && activeLocLon !== undefined;
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-8">
@@ -450,7 +448,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Globe — always visible, gains markers/arc as locations are resolved */}
+        {/* Map — always visible, gains markers/arc as locations are resolved */}
         <div className="w-full space-y-6">
           <div className="relative">
             <DistanceMap
@@ -465,14 +463,6 @@ export default function Home() {
               onPickLocation={handlePickLocation}
               radiusPlaces={showPlaces ? radiusPlaces : []}
             />
-            {/* Pick-mode overlay hint */}
-            {pickMode && (
-              <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-4">
-                <div className="bg-black/70 text-white text-sm font-semibold px-4 py-2 rounded-full backdrop-blur-sm">
-                  Click anywhere on the map to set {pickMode === "from" ? "start" : "destination"}
-                </div>
-              </div>
-            )}
             {/* Pick buttons */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-auto z-10">
               <button
