@@ -218,20 +218,28 @@ export default function Home() {
     const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
     const where = (innerKm > 0
       ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
-      : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 100000`;
+      : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 10000`;
     const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
     const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
     fetch(url, { signal: controller.signal })
       .then((r) => r.json())
       .then((data) => {
-        const places = (data.results || [])
-          .map((rec: any) => ({
-            lat: rec.coordinates?.lat,
-            lon: rec.coordinates?.lon,
-            name: rec.name || "Place",
-          }))
-          .filter((p: any) => p.lat !== undefined && p.lon !== undefined);
-        setRadiusPlaces(places);
+        // One town per 1° bearing sector — keep highest-population town in each sector
+        const byDegree = new Map<number, { lat: number; lon: number; name: string; idx: number }>();
+        (data.results || []).forEach((rec: any, idx: number) => {
+          const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
+          if (lat2 === undefined || lon2 === undefined) return;
+          const dLon = (lon2 - activeLocLon!) * Math.PI / 180;
+          const lat1r = activeLocLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
+          const bearing = (Math.atan2(
+            Math.sin(dLon) * Math.cos(lat2r),
+            Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
+          ) * 180 / Math.PI + 360) % 360;
+          const sector = Math.floor(bearing);
+          // Results are ordered by population desc — first seen per sector wins
+          if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place", idx });
+        });
+        setRadiusPlaces([...byDegree.values()]);
       })
       .catch((err) => console.error("Places fetch error:", err))
       .finally(() => setPlacesLoading(false));
