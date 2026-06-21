@@ -227,14 +227,22 @@ export default function Home() {
       const where = (innerKm > 0
         ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
         : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 10000`;
-      const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
-      const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
-      fetch(url, { signal: controller.signal })
-        .then((r) => r.json())
-        .then((data) => {
-          // One town per 1° bearing sector — keep highest-population town in each sector
+      const baseParams = { where, limit: "100", order_by: "population desc", select: "name,coordinates,population" };
+      const BASE_URL = "https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records";
+      // Fetch 3 pages in parallel (up to 300 towns) so dense areas don't exhaust the budget
+      // on a single cluster — giving all 360 sectors a fair chance
+      const pages = [0, 100, 200].map((offset) => {
+        const p = new URLSearchParams({ ...baseParams, offset: String(offset) });
+        return fetch(`${BASE_URL}?${p}`, { signal: controller.signal }).then((r) => r.json());
+      });
+      Promise.all(pages)
+        .then((responses) => {
+          const allRecords = responses.flatMap((d) => d.results || []);
+          // Sort all records by population desc so highest-pop town wins each sector
+          allRecords.sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
+          // One town per 1° bearing sector
           const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
-          (data.results || []).forEach((rec: any) => {
+          allRecords.forEach((rec: any) => {
             const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
             if (lat2 === undefined || lon2 === undefined) return;
             const dLon = (lon2 - radiusCenterLon!) * Math.PI / 180;
@@ -244,7 +252,6 @@ export default function Home() {
               Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
             ) * 180 / Math.PI + 360) % 360;
             const sector = Math.floor(bearing);
-            // Results ordered by population desc — first seen per sector wins
             if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
           });
           setRadiusPlaces([...byDegree.values()]);
