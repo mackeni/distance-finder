@@ -462,6 +462,10 @@ export default function Home() {
               pickMode={pickMode}
               onPickLocation={handlePickLocation}
               radiusPlaces={showPlaces ? radiusPlaces : []}
+              onRadiusChange={(miles) => {
+                const val = unit === "miles" ? miles : Math.round(miles * 1.60934);
+                setRadiusInput(String(val));
+              }}
             />
             {/* Pick buttons */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-auto z-10">
