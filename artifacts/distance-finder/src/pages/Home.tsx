@@ -216,9 +216,9 @@ export default function Home() {
     const outerKm = (radiusMeters + bandMeters) / 1000;
     const innerKm = Math.max(0, radiusMeters - bandMeters) / 1000;
     const pt = `geom'POINT(${activeLocLon} ${activeLocLat})'`;
-    const where = innerKm > 0
+    const where = (innerKm > 0
       ? `distance(coordinates, ${pt}, ${outerKm}km) AND NOT distance(coordinates, ${pt}, ${innerKm}km)`
-      : `distance(coordinates, ${pt}, ${outerKm}km)`;
+      : `distance(coordinates, ${pt}, ${outerKm}km)`) + ` AND population > 100000`;
     const params = new URLSearchParams({ where, limit: "100", order_by: "population desc", select: "name,coordinates" });
     const url = `https://public.opendatasoft.com/api/explore/v2.1/catalog/datasets/geonames-all-cities-with-a-population-1000/records?${params}`;
     fetch(url, { signal: controller.signal })
