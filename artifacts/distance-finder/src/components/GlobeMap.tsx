@@ -147,8 +147,10 @@ function MapView({
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
-  const [zoomLocked, setZoomLocked] = useState(false);
-  const toggleLock = useCallback(() => setZoomLocked(v => !v), []);
+  const [radiusLocked, setRadiusLocked] = useState(false);
+  const radiusLockedRef = useRef(false);
+  radiusLockedRef.current = radiusLocked;
+  const toggleLock = useCallback(() => setRadiusLocked(v => !v), []);
 
   const hasUser = userLat !== undefined && userLon !== undefined;
   const hasDest = destLat !== undefined && destLon !== undefined;
@@ -236,21 +238,6 @@ function MapView({
       });
     }
   }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles, rCLat, rCLon]);
-
-  // Zoom lock
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!mapLoaded || !map) return;
-    if (zoomLocked) {
-      map.scrollZoom.disable();
-      map.touchZoomRotate.disable();
-      map.doubleClickZoom.disable();
-    } else {
-      map.scrollZoom.enable();
-      map.touchZoomRotate.enable();
-      map.doubleClickZoom.enable();
-    }
-  }, [mapLoaded, zoomLocked]);
 
   // Arc layer
   useEffect(() => {
@@ -358,6 +345,7 @@ function MapView({
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2 || !onRadiusChangeRef.current) return;
+      if (radiusLockedRef.current) return; // locked — let map handle the pinch normally
       pinchStartDist = getTouchDist(e.touches);
       // Use current radius, or default to 500 mi so pinch can create a radius
       pinchStartMiles = radiusKmRef.current !== undefined
@@ -412,15 +400,15 @@ function MapView({
       {/* Zoom lock toggle — bottom-left, above MapLibre attribution */}
       <button
         onClick={toggleLock}
-        title={zoomLocked ? "Unlock map zoom" : "Lock map zoom"}
+        title={radiusLocked ? "Unlock radius — pinch will resize circle" : "Lock radius — pinch will zoom map instead"}
         className={`absolute bottom-8 left-3 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium shadow transition-colors ${
-          zoomLocked
+          radiusLocked
             ? "bg-primary text-primary-foreground"
             : "bg-black/50 text-white hover:bg-black/70"
         }`}
       >
-        {zoomLocked ? <Lock className="w-3.5 h-3.5" /> : <LockOpen className="w-3.5 h-3.5" />}
-        {zoomLocked ? "Zoom locked" : "Lock zoom"}
+        {radiusLocked ? <Lock className="w-3.5 h-3.5" /> : <LockOpen className="w-3.5 h-3.5" />}
+        {radiusLocked ? "Radius locked" : "Lock radius"}
       </button>
     </div>
   );
