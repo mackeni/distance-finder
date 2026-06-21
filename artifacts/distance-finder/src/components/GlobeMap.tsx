@@ -8,6 +8,8 @@ interface GlobeMapProps {
   destLat?: number;
   destLon?: number;
   radiusMiles?: number;
+  radiusCenterLat?: number;
+  radiusCenterLon?: number;
   destName?: string;
   userLabel?: string;
   pickMode?: "from" | "to" | null;
@@ -132,6 +134,7 @@ const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", feature
 
 function MapView({
   userLat, userLon, destLat, destLon, radiusMiles,
+  radiusCenterLat, radiusCenterLon,
   destName, userLabel,
   pickMode, onPickLocation,
   radiusPlaces,
@@ -146,6 +149,10 @@ function MapView({
   const hasUser = userLat !== undefined && userLon !== undefined;
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
+  // Radius centre: explicit prop if provided, otherwise fall back to user location
+  const rCLat = radiusCenterLat ?? userLat;
+  const rCLon = radiusCenterLon ?? userLon;
+  const hasRadiusCentre = rCLat !== undefined && rCLon !== undefined;
 
   // Initialise map once
   useEffect(() => {
@@ -200,12 +207,12 @@ function MapView({
     let minLat = userLat!;
     let maxLat = userLat!;
 
-    if (radiusKm) {
+    if (radiusKm && hasRadiusCentre) {
       const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
-      minLon = Math.min(minLon, userLon! - degRadius);
-      maxLon = Math.max(maxLon, userLon! + degRadius);
-      minLat = Math.max(-85, Math.min(minLat, userLat! - degRadius));
-      maxLat = Math.min(85, Math.max(maxLat, userLat! + degRadius));
+      minLon = Math.min(minLon, rCLon! - degRadius);
+      maxLon = Math.max(maxLon, rCLon! + degRadius);
+      minLat = Math.max(-85, Math.min(minLat, rCLat! - degRadius));
+      maxLat = Math.min(85, Math.max(maxLat, rCLat! + degRadius));
     }
 
     if (hasDest && destLat !== undefined && destLon !== undefined) {
@@ -224,7 +231,7 @@ function MapView({
         duration: 800,
       });
     }
-  }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles]);
+  }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles, rCLat, rCLon]);
 
   // Arc layer
   useEffect(() => {
@@ -244,15 +251,15 @@ function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    const geometry: GeoJSON.Geometry = hasUser && radiusKm
-      ? geodesicCircleForMapLibre(userLat!, userLon!, radiusKm)
+    const geometry: GeoJSON.Geometry = hasRadiusCentre && radiusKm
+      ? geodesicCircleForMapLibre(rCLat!, rCLon!, radiusKm)
       : { type: "Polygon", coordinates: [[]] };
     (map.getSource("radius") as maplibregl.GeoJSONSource).setData({
       type: "Feature",
       geometry,
       properties: {},
     });
-  }, [mapLoaded, hasUser, userLat, userLon, radiusKm]);
+  }, [mapLoaded, hasRadiusCentre, rCLat, rCLon, radiusKm]);
 
   // User marker
   useEffect(() => {
