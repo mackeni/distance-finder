@@ -1,0 +1,52 @@
+2026-06-21T16:41:28.724971Z	Cloning repository...
+2026-06-21T16:41:29.668324Z	From https://github.com/mackeni/distance-finder
+2026-06-21T16:41:29.668699Z	 * branch            ad8e25b248adad437055a4822f7f14dbe0635271 -> FETCH_HEAD
+2026-06-21T16:41:29.668797Z	
+2026-06-21T16:41:29.699239Z	HEAD is now at ad8e25b Remove unused deps: react-globe.gl, leaflet, react-leaflet, @types/leaflet, @workspace/api-client-react
+2026-06-21T16:41:29.699569Z	
+2026-06-21T16:41:29.742022Z	
+2026-06-21T16:41:29.742358Z	Using v2 root directory strategy
+2026-06-21T16:41:29.75811Z	Success: Finished cloning repository files
+2026-06-21T16:41:32.582707Z	Checking for configuration in a Wrangler configuration file (BETA)
+2026-06-21T16:41:32.58337Z	
+2026-06-21T16:41:32.749382Z	No Wrangler configuration file found. Continuing.
+2026-06-21T16:41:33.158495Z	Detected the following tools from environment: nodejs@20.20.0, pnpm@10.29.3
+2026-06-21T16:41:33.158955Z	Installing nodejs 20.20.0
+2026-06-21T16:41:33.897193Z	Trying to update node-build... ok
+2026-06-21T16:41:33.962577Z	To follow progress, use 'tail -f /tmp/node-build.20260621164133.803.log' or pass --verbose
+2026-06-21T16:41:34.010594Z	Downloading node-v20.20.0-linux-x64.tar.gz...
+2026-06-21T16:41:34.15238Z	-> https://nodejs.org/dist/v20.20.0/node-v20.20.0-linux-x64.tar.gz
+2026-06-21T16:41:37.477851Z	
+2026-06-21T16:41:37.478199Z	WARNING: node-v20.20.0-linux-x64 is past its end of life and is now unsupported.
+2026-06-21T16:41:37.478333Z	It no longer receives bug fixes or security updates.
+2026-06-21T16:41:37.47843Z	
+2026-06-21T16:41:37.47853Z	Installing node-v20.20.0-linux-x64...
+2026-06-21T16:41:37.853227Z	Installed node-v20.20.0-linux-x64 to /opt/buildhome/.asdf/installs/nodejs/20.20.0
+2026-06-21T16:41:37.853551Z	
+2026-06-21T16:41:39.411816Z	npm warn EBADENGINE Unsupported engine {
+2026-06-21T16:41:39.41304Z	npm warn EBADENGINE   package: 'corepack@0.35.0',
+2026-06-21T16:41:39.413226Z	npm warn EBADENGINE   required: { node: '^22.22.2 || ^24.15.0 || >=26.0.0' },
+2026-06-21T16:41:39.413303Z	npm warn EBADENGINE   current: { node: 'v20.20.0', npm: '10.8.2' }
+2026-06-21T16:41:39.413398Z	npm warn EBADENGINE }
+2026-06-21T16:41:39.53688Z	
+2026-06-21T16:41:39.537146Z	changed 1 package in 568ms
+2026-06-21T16:41:39.544162Z	Reshimming asdf nodejs...
+2026-06-21T16:41:42.66062Z	Preparing pnpm@10.29.3 for immediate activation...
+2026-06-21T16:41:45.233385Z	Installing project dependencies: pnpm install
+2026-06-21T16:41:45.773307Z	Scope: all 9 workspace projects
+2026-06-21T16:41:46.262847Z	 ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile" because pnpm-lock.yaml is not up to date with <ROOT>/artifacts/distance-finder/package.json
+2026-06-21T16:41:46.26316Z	
+2026-06-21T16:41:46.263257Z	Note that in CI environments this setting is true by default. If you still need to run install in such cases, use "pnpm install --no-frozen-lockfile"
+2026-06-21T16:41:46.263389Z	
+2026-06-21T16:41:46.26346Z	  Failure reason:
+2026-06-21T16:41:46.263529Z	  specifiers in the lockfile don't match specifiers in package.json:
+2026-06-21T16:41:46.26357Z	* 1 dependencies were added: maplibre-gl@^3.6.2
+2026-06-21T16:41:46.2636Z	* 5 dependencies were removed: @types/leaflet@^1.9.21, leaflet@^1.9.4, react-globe.gl@^2.38.0, react-leaflet@^5.0.0, @workspace/api-client-react@workspace:*
+2026-06-21T16:41:46.263643Z	
+2026-06-21T16:41:46.299463Z	Error: Exit with error code: 1
+2026-06-21T16:41:46.299715Z	    at ChildProcess.<anonymous> (/snapshot/dist/run-build.js)
+2026-06-21T16:41:46.299821Z	    at Object.onceWrapper (node:events:652:26)
+2026-06-21T16:41:46.299862Z	    at ChildProcess.emit (node:events:537:28)
+2026-06-21T16:41:46.299947Z	    at ChildProcess._handle.onexit (node:internal/child_process:291:12)
+2026-06-21T16:41:46.305195Z	Failed: build command exited with code: 1
+2026-06-21T16:41:46.916973Z	Failed: error occurred while running build command
