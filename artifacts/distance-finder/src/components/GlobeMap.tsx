@@ -13,6 +13,7 @@ interface GlobeMapProps {
   pickMode?: "from" | "to" | null;
   onPickLocation?: (lat: number, lng: number) => void;
   radiusPlaces?: { lat: number; lon: number; name: string }[];
+  onRadiusChange?: (miles: number) => void;
 }
 
 /** Raw geodesic circle — clockwise [lon, lat] points, 256 steps. */
@@ -134,6 +135,7 @@ function MapView({
   destName, userLabel,
   pickMode, onPickLocation,
   radiusPlaces,
+  onRadiusChange,
 }: GlobeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -306,6 +308,66 @@ function MapView({
     map.on("click", onClick);
     return () => { map.off("click", onClick); };
   }, [mapLoaded, pickMode, onPickLocation]);
+
+  // Pinch-to-resize radius — two-finger gesture on the map canvas
+  // Uses refs so the handler stays stable and always reads fresh values.
+  const radiusKmRef = useRef<number | undefined>(radiusKm);
+  radiusKmRef.current = radiusKm;
+  const onRadiusChangeRef = useRef(onRadiusChange);
+  onRadiusChangeRef.current = onRadiusChange;
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!mapLoaded || !map) return;
+    const canvas = map.getCanvas();
+
+    let pinchStartDist: number | null = null;
+    let pinchStartMiles: number | null = null;
+
+    const getTouchDist = (touches: TouchList) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !onRadiusChangeRef.current) return;
+      pinchStartDist = getTouchDist(e.touches);
+      // Use current radius, or default to 500 mi so pinch can create a radius
+      pinchStartMiles = radiusKmRef.current !== undefined
+        ? radiusKmRef.current / 1.60934
+        : 500;
+      map.touchZoomRotate.disable();
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || pinchStartDist === null || pinchStartMiles === null) return;
+      e.preventDefault();
+      const scale = getTouchDist(e.touches) / pinchStartDist;
+      const newMiles = Math.min(12000, Math.max(1, Math.round(pinchStartMiles * scale)));
+      onRadiusChangeRef.current?.(newMiles);
+    };
+
+    const onTouchEnd = () => {
+      if (pinchStartDist !== null) {
+        map.touchZoomRotate.enable();
+        pinchStartDist = null;
+        pinchStartMiles = null;
+      }
+    };
+
+    canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd);
+    canvas.addEventListener("touchcancel", onTouchEnd);
+    return () => {
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
+      canvas.removeEventListener("touchcancel", onTouchEnd);
+      map.touchZoomRotate.enable();
+    };
+  }, [mapLoaded]);
 
   return (
     <div
