@@ -400,7 +400,7 @@ export default function Home() {
                 onCheckedChange={setShowPlaces}
               />
               <label htmlFor="show-places" className="text-sm text-muted-foreground cursor-pointer select-none flex items-center gap-2">
-                Show towns on circumference
+                Show towns near circumference
                 {placesLoading && <Loader2 className="w-3.5 h-3.5 animate-spin opacity-60" />}
                 {!placesLoading && showPlaces && radiusPlaces.length > 0 && (
                   <span className="text-xs opacity-50">({radiusPlaces.length})</span>
