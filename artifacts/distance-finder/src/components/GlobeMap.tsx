@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, Component } from "react";
+import { useRef, useEffect, useState, Component } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -130,6 +130,10 @@ function greatCirclePoints(
 
 // ─── 2D MapLibre view ─────────────────────────────────────────────────────────
 
+const EMPTY_POLY: GeoJSON.Feature = { type: "Feature", geometry: { type: "Polygon", coordinates: [[]] }, properties: {} };
+const EMPTY_LINE: GeoJSON.Feature = { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
 function MapView({
   userLat, userLon, destLat, destLon, radiusMiles,
   destName, userLabel,
@@ -146,9 +150,6 @@ function MapView({
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
 
-  const emptyPoly: GeoJSON.Feature = { type: "Feature", geometry: { type: "Polygon", coordinates: [[]] }, properties: {} };
-  const emptyLine: GeoJSON.Feature = { type: "Feature", geometry: { type: "LineString", coordinates: [] }, properties: {} };
-
   // Initialise map once
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -161,10 +162,9 @@ function MapView({
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.on("load", () => {
-      const emptyFC: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
-      map.addSource("radius", { type: "geojson", data: emptyPoly });
-      map.addSource("arc", { type: "geojson", data: emptyLine });
-      map.addSource("places", { type: "geojson", data: emptyFC });
+      map.addSource("radius", { type: "geojson", data: EMPTY_POLY });
+      map.addSource("arc", { type: "geojson", data: EMPTY_LINE });
+      map.addSource("places", { type: "geojson", data: EMPTY_FC });
       map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15 } });
       map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#2563eb", "line-width": 2.5, "line-opacity": 0.85 } });
