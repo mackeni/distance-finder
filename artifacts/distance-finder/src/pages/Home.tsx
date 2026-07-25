@@ -266,7 +266,8 @@ export default function Home() {
           setRadiusPlaces([...byDegree.values()]);
         })
         .catch((err) => { if ((err as any)?.name !== "AbortError") console.error("Places fetch error:", err); })
-        .finally(() => setPlacesLoading(false));
+        .then(() => { if (!controller.signal.aborted) setPlacesLoading(false); })
+        .catch(() => { if (!controller.signal.aborted) setPlacesLoading(false); });
     }, 600);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [showPlaces, parsedRadiusRaw, radiusCenterLat, radiusCenterLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
