@@ -132,6 +132,33 @@ export default function Home() {
   const handlePickLocation = async (lat: number, lng: number) => {
     const mode = pickMode;
     setPickMode(null);
+
+    // Apply the picked location and keep distance/bearing/status in sync with it,
+    // whether the name came from a successful reverse-geocode or the raw-coord fallback.
+    const applyPickedLocation = (shortName: string, loc: LocResult) => {
+      if (mode === "from") {
+        setFromInput(shortName);
+        setCustomStart(loc);
+        if (destLoc) {
+          setDistanceKm(haversineKm(loc.lat, loc.lon, destLoc.lat, destLoc.lon));
+          setBearing(getBearing(loc.lat, loc.lon, destLoc.lat, destLoc.lon));
+          setStatus("success");
+        } else {
+          setStatus("idle");
+        }
+      } else {
+        setToInput(shortName);
+        setDestLoc(loc);
+        const startLat = usingCustomStart ? customStart?.lat : gpsLoc?.lat;
+        const startLon = usingCustomStart ? customStart?.lon : gpsLoc?.lon;
+        if (startLat !== undefined && startLon !== undefined) {
+          setDistanceKm(haversineKm(startLat, startLon, loc.lat, loc.lon));
+          setBearing(getBearing(startLat, startLon, loc.lat, loc.lon));
+          setStatus("success");
+        }
+      }
+    };
+
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`
@@ -145,34 +172,11 @@ export default function Home() {
         data.address?.village ||
         data.address?.county ||
         fullName.split(",")[0].trim();
-      const loc: LocResult = { lat, lon: lng, name: fullName };
-      if (mode === "from") {
-        setFromInput(shortName);
-        setCustomStart(loc);
-        if (destLoc) {
-          setDistanceKm(haversineKm(lat, lng, destLoc.lat, destLoc.lon));
-          setBearing(getBearing(lat, lng, destLoc.lat, destLoc.lon));
-          setStatus("success");
-        } else {
-          setStatus("idle");
-        }
-      } else {
-        setToInput(shortName);
-        setDestLoc(loc);
-        const startLat = usingCustomStart ? customStart?.lat : gpsLoc?.lat;
-        const startLon = usingCustomStart ? customStart?.lon : gpsLoc?.lon;
-        if (startLat !== undefined && startLon !== undefined) {
-          setDistanceKm(haversineKm(startLat, startLon, lat, lng));
-          setBearing(getBearing(startLat, startLon, lat, lng));
-          setStatus("success");
-        }
-      }
+      applyPickedLocation(shortName, { lat, lon: lng, name: fullName });
     } catch {
       // fall back to raw coords as label
       const shortName = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      const loc: LocResult = { lat, lon: lng, name: shortName };
-      if (mode === "from") { setFromInput(shortName); setCustomStart(loc); }
-      else { setToInput(shortName); setDestLoc(loc); }
+      applyPickedLocation(shortName, { lat, lon: lng, name: shortName });
     }
   };
 
@@ -266,8 +270,7 @@ export default function Home() {
           setRadiusPlaces([...byDegree.values()]);
         })
         .catch((err) => { if ((err as any)?.name !== "AbortError") console.error("Places fetch error:", err); })
-        .then(() => { if (!controller.signal.aborted) setPlacesLoading(false); })
-        .catch(() => { if (!controller.signal.aborted) setPlacesLoading(false); });
+        .then(() => { if (!controller.signal.aborted) setPlacesLoading(false); });
     }, 600);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [showPlaces, parsedRadiusRaw, radiusCenterLat, radiusCenterLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
