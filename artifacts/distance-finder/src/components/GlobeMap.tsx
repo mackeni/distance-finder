@@ -95,10 +95,24 @@ function withPolarCap(ring: [number, number][], poleLat: number): [number, numbe
 /**
  * GeoJSON Polygon for MapLibre GL that handles all radius sizes correctly.
  *
- * • radius ≤ 90° arc  → simple polygon (or pole-capped single ring)
- * • radius > 90° arc  → world polygon with antipodal complement cap as a hole
- *   (the circle covers >hemisphere; shade = world minus the antipodal cap)
+ * • radius < 90°+|lat| arc → direct polygon: the circle's own boundary ring,
+ *   pole-capped if it encloses the one pole it can reach at this size.
+ * • radius ≥ 90°+|lat| arc → world polygon with the antipodal complement cut
+ *   out as a hole (shade = world minus that small far-side cap).
  * • radius ≥ 180° arc → full world rectangle
+ *
+ * The threshold is *not* simply 90° (a hemisphere). A circle's boundary ring
+ * can only ever wrap one pole by itself — wrapping both at once isn't a
+ * single simple loop, since the "inside" would be everywhere except a
+ * plain island nowhere near either pole. So the direct-ring strategy stays
+ * valid past the hemisphere mark, right up until the *complement* cap would
+ * itself have to wrap the far pole (which happens once the radius reaches
+ * 90°+|lat| — the complement's distance from that pole). Cutting from the
+ * hole side any earlier makes the hole ring wrap a pole too, and a ring that
+ * both wraps a pole *and* needs to unwrap past ±180° to sit inside the
+ * world rectangle produces an invalid hole (visible as a stray triangular
+ * fill artifact) — so hand off to the world-minus-hole strategy only once
+ * that can no longer happen.
  */
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
@@ -111,27 +125,20 @@ function geodesicCircleForMapLibre(
   }
 
   const degRadius = (d * 180) / Math.PI;
+  const safeHoleThreshold = 90 + Math.abs(lat);
 
-  // Large circle (> hemisphere): shade = world minus antipodal complement cap
-  if (d > Math.PI / 2) {
+  // Large circle: shade = world minus antipodal complement cap.
+  // Safe once the complement can't reach the far pole (see comment above).
+  if (degRadius >= safeHoleThreshold) {
     const antipodeLat = -lat;
     const antipodeLon = lon >= 0 ? lon - 180 : lon + 180;
     const complementKm = (Math.PI - d) * 6371.0088;
-    const compDegRadius = 180 - degRadius;
-
-    let hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
-
-    // Does the complement cap touch a pole?
-    const compNP = antipodeLat + compDegRadius > 90;
-    const compSP = antipodeLat - compDegRadius < -90;
-    if (compNP || compSP) {
-      hole = withPolarCap(hole, compNP ? 90 : -90);
-    }
-
+    const hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
     return { type: "Polygon", coordinates: [WORLD_RING, hole] };
   }
 
-  // Normal circle (d ≤ π/2)
+  // Direct circle — covers both the plain case and the "large but still
+  // single-pole" case up to safeHoleThreshold.
   const ring = geodesicCircleMapLibre(lat, lon, radiusKm);
   const includesNP = lat + degRadius > 90;
   const includesSP = lat - degRadius < -90;
