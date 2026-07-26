@@ -196,6 +196,11 @@ function MapView({
   radiusLockedRef.current = radiusLocked;
   const toggleLock = useCallback(() => setRadiusLocked(v => !v), []);
 
+  // True while a two-finger pinch-to-resize gesture is in progress — used to
+  // suppress the camera auto-fit below so it doesn't fight the user's gesture.
+  const isPinchingRef = useRef(false);
+  const fitToBoundsRef = useRef<() => void>(() => {});
+
   const hasUser = userLat !== undefined && userLon !== undefined;
   const hasDest = destLat !== undefined && destLon !== undefined;
   const radiusKm = radiusMiles ? radiusMiles * 1.60934 : undefined;
@@ -251,36 +256,44 @@ function MapView({
     if (!mapLoaded || !map) return;
     if (!hasUser) return;
 
-    // Build combined bounding box from all visible features
-    let minLon = userLon!;
-    let maxLon = userLon!;
-    let minLat = userLat!;
-    let maxLat = userLat!;
+    const fit = () => {
+      // Build combined bounding box from all visible features
+      let minLon = userLon!;
+      let maxLon = userLon!;
+      let minLat = userLat!;
+      let maxLat = userLat!;
 
-    if (radiusKm && hasRadiusCentre) {
-      const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
-      minLon = Math.min(minLon, rCLon! - degRadius);
-      maxLon = Math.max(maxLon, rCLon! + degRadius);
-      minLat = Math.max(-85, Math.min(minLat, rCLat! - degRadius));
-      maxLat = Math.min(85, Math.max(maxLat, rCLat! + degRadius));
-    }
+      if (radiusKm && hasRadiusCentre) {
+        const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
+        minLon = Math.min(minLon, rCLon! - degRadius);
+        maxLon = Math.max(maxLon, rCLon! + degRadius);
+        minLat = Math.max(-85, Math.min(minLat, rCLat! - degRadius));
+        maxLat = Math.min(85, Math.max(maxLat, rCLat! + degRadius));
+      }
 
-    if (hasDest && destLat !== undefined && destLon !== undefined) {
-      minLon = Math.min(minLon, destLon);
-      maxLon = Math.max(maxLon, destLon);
-      minLat = Math.max(-85, Math.min(minLat, destLat));
-      maxLat = Math.min(85, Math.max(maxLat, destLat));
-    }
+      if (hasDest && destLat !== undefined && destLon !== undefined) {
+        minLon = Math.min(minLon, destLon);
+        maxLon = Math.max(maxLon, destLon);
+        minLat = Math.max(-85, Math.min(minLat, destLat));
+        maxLat = Math.min(85, Math.max(maxLat, destLat));
+      }
 
-    if (minLon === maxLon && minLat === maxLat) {
-      map.flyTo({ center: [userLon!, userLat!], zoom: 8, duration: 800 });
-    } else {
-      map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
-        padding: 60,
-        maxZoom: 10,
-        duration: 800,
-      });
-    }
+      if (minLon === maxLon && minLat === maxLat) {
+        map.flyTo({ center: [userLon!, userLat!], zoom: 8, duration: 800 });
+      } else {
+        map.fitBounds([[minLon, minLat], [maxLon, maxLat]], {
+          padding: 60,
+          maxZoom: 10,
+          duration: 800,
+        });
+      }
+    };
+
+    fitToBoundsRef.current = fit;
+    // Skip the auto re-fit while a pinch gesture is live — it would fight the
+    // gesture on every touchmove. onTouchEnd triggers one final fit instead.
+    if (isPinchingRef.current) return;
+    fit();
   }, [mapLoaded, hasUser, hasDest, userLat, userLon, destLat, destLon, radiusMiles, rCLat, rCLon]);
 
   // Arc layer
@@ -395,6 +408,7 @@ function MapView({
       pinchStartMiles = radiusKmRef.current !== undefined
         ? radiusKmRef.current / 1.60934
         : 500;
+      isPinchingRef.current = true;
       map.touchZoomRotate.disable();
     };
 
@@ -411,6 +425,10 @@ function MapView({
         map.touchZoomRotate.enable();
         pinchStartDist = null;
         pinchStartMiles = null;
+      }
+      if (isPinchingRef.current) {
+        isPinchingRef.current = false;
+        fitToBoundsRef.current(); // snap the camera to the final radius once the gesture ends
       }
     };
 
