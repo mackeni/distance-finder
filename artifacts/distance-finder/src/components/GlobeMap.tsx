@@ -76,12 +76,20 @@ const WORLD_RING: [number, number][] = [
 /**
  * Integrate a polar cap into a ring by adding two pole-crossing segments.
  * Works for both CCW outer rings and CW hole rings.
+ *
+ * The input ring is already a full 2π sweep of the circle boundary. When that
+ * circle encloses a pole, its first and last points are the same geographic
+ * location but land ~360° apart in unwrapped longitude (the sweep winds all
+ * the way around the pole) — unlike a non-polar ring, where first === last
+ * exactly. Dropping the last point as a "duplicate" here throws away the real
+ * far-side meridian and caps the polygon a step short, leaving a sliver seam
+ * near the antimeridian. Keep both endpoints so the cap closes at the true
+ * unwrapped longitudes.
  */
 function withPolarCap(ring: [number, number][], poleLat: number): [number, number][] {
-  const open = ring.slice(0, ring.length - 1);
-  const firstLon = open[0][0];
-  const lastLon  = open[open.length - 1][0];
-  return [...open, [lastLon, poleLat], [firstLon, poleLat], open[0]];
+  const firstLon = ring[0][0];
+  const lastLon = ring[ring.length - 1][0];
+  return [...ring, [lastLon, poleLat], [firstLon, poleLat], ring[0]];
 }
 
 /**
