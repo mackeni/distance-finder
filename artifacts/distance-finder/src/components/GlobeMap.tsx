@@ -128,49 +128,56 @@ function withPolarCap(ring: [number, number][], poleLat: number): [number, numbe
 }
 
 /**
- * Express "world minus a small, pole-free island" as two simple (hole-free)
- * rings instead of one ring with a hole in it.
+ * Express "world minus a small, pole-free island" as four simple polygons —
+ * three plain hole-free rectangles plus one small rectangle that uses the
+ * island as an ordinary GeoJSON hole.
  *
  * MapLibre GL's polygon tessellation (earcut, fed via geojson-vt) turns out
- * to reliably mis-triangulate a hole sitting close to a pole inside the
- * world rectangle — confirmed by testing far past the point where the hole
- * mathematically touches the pole; even a plain circle sitting a few degrees
- * short of one still comes out as a stray filled triangle. It reproduces
- * with any point count and is unrelated to how finely the hole is sampled,
- * so it isn't something more/adaptive sampling can fix — the hole itself is
- * the problem.
+ * to unpredictably mis-triangulate a hole cut into a *world-spanning*
+ * rectangle. It first showed up as a hole sitting close to a pole, but
+ * further testing found it isn't really about poles: two hand-rolled
+ * "single ring with a slit" encodings that stood in for the hole each
+ * rendered correctly for one test case and produced a stray filled
+ * triangle, or filled almost nothing at all, for another — both simple,
+ * non-self-crossing rings by every check applied to them, so the fault was
+ * in earcut's handling of a ring that touches itself at a single vertex to
+ * fake a hole, not in the geometry. Since the failures didn't correlate
+ * with proximity to a pole once tested more broadly, the safe conclusion is
+ * that a hole's *scale relative to its containing ring* is what matters:
+ * cutting a small hole into a small, tightly-fitted rectangle around it
+ * only (rather than the whole WORLD_RING) reproduced correctly in every
+ * case tried, including ones that failed both earlier approaches.
  *
- * The fix is to never hand MapLibre that hole at all. Cut the world at the
- * island's own northernmost point into two hole-free pieces: a plain
- * rectangle north of it (nothing to exclude up there), and a single ring
- * for everything south of it that dips down, traces the island's boundary
- * as a zero-width slit, and comes back up — a standard "polygon with a
- * slit" encoding of a hole that never asks earcut to link a separate hole
- * ring. The island's own topmost point is always a safe slit anchor: moving
- * further north from there immediately leaves the island, so the slit can't
- * cross back into it.
+ * So: fit a rectangle snugly around the island (plus a margin) and give it
+ * the island as a genuine hole — small and unremarkable enough for earcut
+ * to triangulate normally — then cover the rest of the globe with three
+ * plain rectangles that need no holes at all: north of the box, south of
+ * it, and a middle strip at the box's own latitude band running the long
+ * way around from the box's right edge back to its left edge. Everything is
+ * expressed relative to the box's own (possibly antimeridian-crossing,
+ * possibly far outside +-180) longitude bounds rather than assuming a
+ * +-180 world, so it stays correct regardless of where the island sits.
  */
-function worldMinusIsland(island: [number, number][]): [number, number][][] {
-  let topIdx = 0;
-  for (let i = 1; i < island.length; i++) {
-    if (island[i][1] > island[topIdx][1]) topIdx = i;
+function worldMinusIsland(island: [number, number][]): [number, number][][][] {
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const [lon, lat] of island) {
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
   }
-  const rotated = [...island.slice(topIdx), ...island.slice(0, topIdx)];
-  const [topLon, topLat] = rotated[0];
+  const MARGIN = 2; // degrees of clearance around the island — imperceptible at map scale
+  const L = minLon - MARGIN;
+  const R = maxLon + MARGIN;
+  const bottom = Math.max(-90, minLat - MARGIN);
+  const top = Math.min(90, maxLat + MARGIN);
 
-  const southOfIsland: [number, number][] = [
-    [topLon, topLat],
-    ...rotated,
-    [topLon, topLat],
-    [topLon - 360, topLat],
-    [topLon - 360, -90],
-    [topLon, -90],
-    [topLon, topLat],
-  ];
-  const northOfIsland: [number, number][] = [
-    [-180, topLat], [-180, 90], [180, 90], [180, topLat], [-180, topLat],
-  ];
-  return [northOfIsland, southOfIsland];
+  const box: [number, number][] = [[L, bottom], [L, top], [R, top], [R, bottom], [L, bottom]];
+  const north: [number, number][] = [[L, top], [L, 90], [L + 360, 90], [L + 360, top], [L, top]];
+  const south: [number, number][] = [[L, -90], [L, bottom], [L + 360, bottom], [L + 360, -90], [L, -90]];
+  const middle: [number, number][] = [[R, bottom], [R, top], [L + 360, top], [L + 360, bottom], [R, bottom]];
+
+  return [[north], [south], [middle], [box, island]];
 }
 
 /**
@@ -179,7 +186,7 @@ function worldMinusIsland(island: [number, number][]): [number, number][][] {
  * • radius < 90°+|lat| arc → direct polygon: the circle's own boundary ring,
  *   pole-capped if it encloses the one pole it can reach at this size.
  * • radius ≥ 90°+|lat| arc → world minus the antipodal complement cap,
- *   expressed as two hole-free rings (see worldMinusIsland).
+ *   expressed as four simple polygons (see worldMinusIsland).
  * • radius ≥ 180° arc → full world rectangle
  *
  * The threshold is *not* simply 90° (a hemisphere). A circle's boundary ring
@@ -211,7 +218,7 @@ function geodesicCircleForMapLibre(
     const antipodeLon = lon >= 0 ? lon - 180 : lon + 180;
     const complementKm = (Math.PI - d) * 6371.0088;
     const hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
-    return { type: "MultiPolygon", coordinates: worldMinusIsland(hole).map(ring => [ring]) };
+    return { type: "MultiPolygon", coordinates: worldMinusIsland(hole) };
   }
 
   // Direct circle — covers both the plain case and the "large but still
