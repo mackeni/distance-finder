@@ -19,14 +19,25 @@ interface GlobeMapProps {
   onRadiusChange?: (miles: number) => void;
 }
 
-/** Raw geodesic circle — clockwise [lon, lat] points, 256 steps. */
+/**
+ * Raw geodesic circle — clockwise [lon, lat] points, adaptively refined.
+ *
+ * Equal steps in bearing don't mean equal steps in longitude: when the
+ * boundary passes close to a pole (without necessarily enclosing it — this
+ * happens for any circle whose radius puts it within a few degrees of one),
+ * longitude sweeps extremely fast for a tiny bearing change near that closest
+ * approach. At the base 256-step resolution that can leave two consecutive
+ * points 80+ degrees apart in longitude, so the polygon draws a straight
+ * chord across a huge swath of the map instead of hugging the pole — a stray
+ * triangular fill artifact. Wherever a step's jump is too large, bisect the
+ * bearing and recurse until it isn't.
+ */
 function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256): [number, number][] {
   const d = radiusKm / 6371.0088;
   const latR = (lat * Math.PI) / 180;
   const lonR = (lon * Math.PI) / 180;
-  const coords: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const θ = (i / steps) * 2 * Math.PI;
+
+  const pointAt = (θ: number): [number, number] => {
     const lat2 = Math.asin(
       Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(θ)
     );
@@ -36,8 +47,32 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
         Math.sin(θ) * Math.sin(d) * Math.cos(latR),
         Math.cos(d) - Math.sin(latR) * Math.sin(lat2)
       );
-    coords.push([(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI]);
+    return [(lon2 * 180) / Math.PI, (lat2 * 180) / Math.PI];
+  };
+
+  const MAX_JUMP_DEG = 3;
+  const MAX_DEPTH = 12;
+  const refine = (
+    θA: number, θB: number, a: [number, number], b: [number, number], depth: number
+  ): [number, number][] => {
+    let dLon = Math.abs(a[0] - b[0]);
+    if (dLon > 180) dLon = 360 - dLon;
+    const dLat = Math.abs(a[1] - b[1]);
+    if (depth >= MAX_DEPTH || Math.max(dLon, dLat) <= MAX_JUMP_DEG) return [a];
+    const θMid = (θA + θB) / 2;
+    const mid = pointAt(θMid);
+    return [...refine(θA, θMid, a, mid, depth + 1), ...refine(θMid, θB, mid, b, depth + 1)];
+  };
+
+  const thetas: number[] = [];
+  for (let i = 0; i <= steps; i++) thetas.push((i / steps) * 2 * Math.PI);
+  const base = thetas.map(pointAt);
+
+  const coords: [number, number][] = [];
+  for (let i = 0; i < base.length - 1; i++) {
+    coords.push(...refine(thetas[i], thetas[i + 1], base[i], base[i + 1], 0));
   }
+  coords.push(base[base.length - 1]);
   return coords;
 }
 
@@ -76,25 +111,96 @@ const WORLD_RING: [number, number][] = [
 /**
  * Integrate a polar cap into a ring by adding two pole-crossing segments.
  * Works for both CCW outer rings and CW hole rings.
+ *
+ * The input ring is already a full 2π sweep of the circle boundary. When that
+ * circle encloses a pole, its first and last points are the same geographic
+ * location but land ~360° apart in unwrapped longitude (the sweep winds all
+ * the way around the pole) — unlike a non-polar ring, where first === last
+ * exactly. Dropping the last point as a "duplicate" here throws away the real
+ * far-side meridian and caps the polygon a step short, leaving a sliver seam
+ * near the antimeridian. Keep both endpoints so the cap closes at the true
+ * unwrapped longitudes.
  */
 function withPolarCap(ring: [number, number][], poleLat: number): [number, number][] {
-  const open = ring.slice(0, ring.length - 1);
-  const firstLon = open[0][0];
-  const lastLon  = open[open.length - 1][0];
-  return [...open, [lastLon, poleLat], [firstLon, poleLat], open[0]];
+  const firstLon = ring[0][0];
+  const lastLon = ring[ring.length - 1][0];
+  return [...ring, [lastLon, poleLat], [firstLon, poleLat], ring[0]];
 }
 
 /**
- * GeoJSON Polygon for MapLibre GL that handles all radius sizes correctly.
+ * Express "world minus a small, pole-free island" as four simple polygons —
+ * three plain hole-free rectangles plus one small rectangle that uses the
+ * island as an ordinary GeoJSON hole.
  *
- * • radius ≤ 90° arc  → simple polygon (or pole-capped single ring)
- * • radius > 90° arc  → world polygon with antipodal complement cap as a hole
- *   (the circle covers >hemisphere; shade = world minus the antipodal cap)
+ * MapLibre GL's polygon tessellation (earcut, fed via geojson-vt) turns out
+ * to unpredictably mis-triangulate a hole cut into a *world-spanning*
+ * rectangle. It first showed up as a hole sitting close to a pole, but
+ * further testing found it isn't really about poles: two hand-rolled
+ * "single ring with a slit" encodings that stood in for the hole each
+ * rendered correctly for one test case and produced a stray filled
+ * triangle, or filled almost nothing at all, for another — both simple,
+ * non-self-crossing rings by every check applied to them, so the fault was
+ * in earcut's handling of a ring that touches itself at a single vertex to
+ * fake a hole, not in the geometry. Since the failures didn't correlate
+ * with proximity to a pole once tested more broadly, the safe conclusion is
+ * that a hole's *scale relative to its containing ring* is what matters:
+ * cutting a small hole into a small, tightly-fitted rectangle around it
+ * only (rather than the whole WORLD_RING) reproduced correctly in every
+ * case tried, including ones that failed both earlier approaches.
+ *
+ * So: fit a rectangle snugly around the island (plus a margin) and give it
+ * the island as a genuine hole — small and unremarkable enough for earcut
+ * to triangulate normally — then cover the rest of the globe with three
+ * plain rectangles that need no holes at all: north of the box, south of
+ * it, and a middle strip at the box's own latitude band running the long
+ * way around from the box's right edge back to its left edge. Everything is
+ * expressed relative to the box's own (possibly antimeridian-crossing,
+ * possibly far outside +-180) longitude bounds rather than assuming a
+ * +-180 world, so it stays correct regardless of where the island sits.
+ */
+function worldMinusIsland(island: [number, number][]): [number, number][][][] {
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const [lon, lat] of island) {
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  }
+  const MARGIN = 2; // degrees of clearance around the island — imperceptible at map scale
+  const L = minLon - MARGIN;
+  const R = maxLon + MARGIN;
+  const bottom = Math.max(-90, minLat - MARGIN);
+  const top = Math.min(90, maxLat + MARGIN);
+
+  const box: [number, number][] = [[L, bottom], [L, top], [R, top], [R, bottom], [L, bottom]];
+  const north: [number, number][] = [[L, top], [L, 90], [L + 360, 90], [L + 360, top], [L, top]];
+  const south: [number, number][] = [[L, -90], [L, bottom], [L + 360, bottom], [L + 360, -90], [L, -90]];
+  const middle: [number, number][] = [[R, bottom], [R, top], [L + 360, top], [L + 360, bottom], [R, bottom]];
+
+  return [[north], [south], [middle], [box, island]];
+}
+
+/**
+ * GeoJSON geometry for MapLibre GL that handles all radius sizes correctly.
+ *
+ * • radius < 90°+|lat| arc → direct polygon: the circle's own boundary ring,
+ *   pole-capped if it encloses the one pole it can reach at this size.
+ * • radius ≥ 90°+|lat| arc → world minus the antipodal complement cap,
+ *   expressed as four simple polygons (see worldMinusIsland).
  * • radius ≥ 180° arc → full world rectangle
+ *
+ * The threshold is *not* simply 90° (a hemisphere). A circle's boundary ring
+ * can only ever wrap one pole by itself — wrapping both at once isn't a
+ * single simple loop, since the "inside" would be everywhere except a
+ * plain island nowhere near either pole. So the direct-ring strategy stays
+ * valid past the hemisphere mark, right up until the *complement* cap would
+ * itself have to wrap the far pole (which happens once the radius reaches
+ * 90°+|lat| — the complement's distance from that pole) — so hand off to
+ * the world-minus-island strategy only once that can no longer happen.
  */
 function geodesicCircleForMapLibre(
   lat: number, lon: number, radiusKm: number
-): GeoJSON.Polygon {
+): GeoJSON.Geometry {
   const d = radiusKm / 6371.0088; // angular radius in radians
 
   // Entire globe
@@ -103,27 +209,20 @@ function geodesicCircleForMapLibre(
   }
 
   const degRadius = (d * 180) / Math.PI;
+  const safeHoleThreshold = 90 + Math.abs(lat);
 
-  // Large circle (> hemisphere): shade = world minus antipodal complement cap
-  if (d > Math.PI / 2) {
+  // Large circle: shade = world minus antipodal complement cap.
+  // Safe once the complement can't reach the far pole (see comment above).
+  if (degRadius >= safeHoleThreshold) {
     const antipodeLat = -lat;
     const antipodeLon = lon >= 0 ? lon - 180 : lon + 180;
     const complementKm = (Math.PI - d) * 6371.0088;
-    const compDegRadius = 180 - degRadius;
-
-    let hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
-
-    // Does the complement cap touch a pole?
-    const compNP = antipodeLat + compDegRadius > 90;
-    const compSP = antipodeLat - compDegRadius < -90;
-    if (compNP || compSP) {
-      hole = withPolarCap(hole, compNP ? 90 : -90);
-    }
-
-    return { type: "Polygon", coordinates: [WORLD_RING, hole] };
+    const hole = geodesicCircleMapLibreCW(antipodeLat, antipodeLon, complementKm);
+    return { type: "MultiPolygon", coordinates: worldMinusIsland(hole) };
   }
 
-  // Normal circle (d ≤ π/2)
+  // Direct circle — covers both the plain case and the "large but still
+  // single-pole" case up to safeHoleThreshold.
   const ring = geodesicCircleMapLibre(lat, lon, radiusKm);
   const includesNP = lat + degRadius > 90;
   const includesSP = lat - degRadius < -90;
@@ -137,6 +236,26 @@ function geodesicCircleForMapLibre(
     type: "Polygon",
     coordinates: [withPolarCap(ring, includesNP ? 90 : -90)],
   };
+}
+
+/**
+ * The circle's true edge, for the outline layer — deliberately separate from
+ * geodesicCircleForMapLibre's fill polygon. That polygon adds pole-crossing
+ * cap segments and, for large radii, the WORLD_RING rectangle — neither is
+ * part of the actual boundary (the pole sits deep inside the shaded area,
+ * not on its edge), and drawing them as a line traces the antimeridian and
+ * the poles as bold, meaningless strokes across the map. The raw circle ring
+ * is already the correct edge in every case: a point at distance d from
+ * (lat, lon) is always at distance (180°−d) from its antipode, so this same
+ * curve is exactly the complement-cap boundary the fill's hole strategy cuts
+ * out for large radii too — no antipode math needed here.
+ */
+function geodesicCircleOutline(lat: number, lon: number, radiusKm: number): GeoJSON.Geometry {
+  const d = radiusKm / 6371.0088;
+  if (d >= Math.PI) {
+    return { type: "LineString", coordinates: [] }; // whole world in range — no edge to draw
+  }
+  return { type: "LineString", coordinates: geodesicCircleMapLibre(lat, lon, radiusKm) };
 }
 
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
@@ -222,10 +341,14 @@ function MapView({
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.on("load", () => {
       map.addSource("radius", { type: "geojson", data: EMPTY_POLY });
+      map.addSource("radius-line", { type: "geojson", data: EMPTY_LINE });
       map.addSource("arc", { type: "geojson", data: EMPTY_LINE });
       map.addSource("places", { type: "geojson", data: EMPTY_FC });
-      map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15 } });
-      map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
+      // fill-antialias: false — the large-radius fill is built from two abutting
+      // polygons (see worldMinusIsland) sharing an exact edge; GL antialiasing
+      // renders that shared edge as a faint seam line otherwise.
+      map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15, "fill-antialias": false } });
+      map.addLayer({ id: "radius-outline", type: "line", source: "radius-line", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#2563eb", "line-width": 2.5, "line-opacity": 0.85 } });
       map.addLayer({ id: "places-dot", type: "circle", source: "places", paint: { "circle-radius": 5, "circle-color": "#22c55e", "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" } });
       map.addLayer({
@@ -314,12 +437,21 @@ function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    const geometry: GeoJSON.Geometry = hasRadiusCentre && radiusKm
+    const hasRadius = hasRadiusCentre && radiusKm;
+    const fillGeometry: GeoJSON.Geometry = hasRadius
       ? geodesicCircleForMapLibre(rCLat!, rCLon!, radiusKm)
       : { type: "Polygon", coordinates: [[]] };
+    const outlineGeometry: GeoJSON.Geometry = hasRadius
+      ? geodesicCircleOutline(rCLat!, rCLon!, radiusKm)
+      : { type: "LineString", coordinates: [] };
     (map.getSource("radius") as maplibregl.GeoJSONSource).setData({
       type: "Feature",
-      geometry,
+      geometry: fillGeometry,
+      properties: {},
+    });
+    (map.getSource("radius-line") as maplibregl.GeoJSONSource).setData({
+      type: "Feature",
+      geometry: outlineGeometry,
       properties: {},
     });
   }, [mapLoaded, hasRadiusCentre, rCLat, rCLon, radiusKm]);
