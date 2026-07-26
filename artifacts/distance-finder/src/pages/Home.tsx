@@ -1,10 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, lazy, Suspense } from "react";
 import { Compass, MapPin, Navigation, Search, X, Loader2, AlertCircle, Circle, LocateFixed } from "lucide-react";
 import { haversineKm, getBearing, getCompassDirection, northSouthKm, northSouthDir, eastWestKm, eastWestDir } from "@/lib/geo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import DistanceMap from "@/components/GlobeMap";
+
+// maplibre-gl is large; split it into its own chunk so the initial page
+// load doesn't have to wait on it.
+const DistanceMap = lazy(() => import("@/components/GlobeMap"));
 
 type AppState = "idle" | "locating" | "searching" | "success" | "error";
 type PickMode = "from" | "to" | null;
@@ -12,14 +15,24 @@ type Unit = "miles" | "km";
 
 interface LocResult { lat: number; lon: number; name: string }
 
+// Session-lifetime cache so re-submitting the same query (e.g. retrying
+// after a transient failure) doesn't re-hit Nominatim unnecessarily.
+const geocodeCache = new Map<string, LocResult>();
+
 async function geocode(query: string): Promise<LocResult> {
+  const cacheKey = query.trim().toLowerCase();
+  const cached = geocodeCache.get(cacheKey);
+  if (cached) return cached;
+
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`
   );
   if (!res.ok) throw new Error("Failed to reach geocoding service.");
   const data = await res.json();
   if (!data || data.length === 0) throw new Error(`Could not find "${query}".`);
-  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name };
+  const result = { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: data[0].display_name };
+  geocodeCache.set(cacheKey, result);
+  return result;
 }
 
 export default function Home() {
@@ -316,6 +329,7 @@ export default function Home() {
               <Input
                 data-testid="input-from"
                 type="text"
+                aria-label="From location"
                 placeholder="From: current location"
                 value={fromInput}
                 onChange={(e) => {
@@ -328,7 +342,7 @@ export default function Home() {
               />
               <LocateFixed className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-colors ${fromInput ? "text-muted-foreground" : "text-primary/60"} group-focus-within:text-primary`} />
               {fromInput && !busy && (
-                <button onClick={handleClearFrom} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1">
+                <button onClick={handleClearFrom} aria-label="Clear from location" className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1">
                   <X className="w-4 h-4" />
                 </button>
               )}
@@ -337,6 +351,7 @@ export default function Home() {
               data-testid="button-search-from"
               onClick={handleSearch}
               disabled={busy}
+              aria-label="Find"
               className="h-auto px-6 sm:px-8 rounded-2xl shadow bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
@@ -351,6 +366,7 @@ export default function Home() {
                 ref={toInputRef}
                 data-testid="input-destination"
                 type="text"
+                aria-label="Destination"
                 placeholder="To: e.g. Tokyo, Eiffel Tower…"
                 value={toInput}
                 onChange={(e) => setToInput(e.target.value)}
@@ -363,6 +379,7 @@ export default function Home() {
                 <button
                   data-testid="button-clear"
                   onClick={handleClear}
+                  aria-label="Clear destination"
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                 >
                   <X className="w-5 h-5" />
@@ -373,6 +390,7 @@ export default function Home() {
               data-testid="button-search"
               onClick={handleSearch}
               disabled={busy}
+              aria-label="Find"
               className="h-auto px-6 sm:px-8 rounded-2xl shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-lg"
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
@@ -407,6 +425,7 @@ export default function Home() {
                 data-testid="input-radius"
                 type="number"
                 min="0"
+                aria-label={`Radius in ${unit}, optional`}
                 placeholder={`Radius in ${unit} (optional)`}
                 value={radiusInput}
                 onChange={(e) => setRadiusInput(e.target.value)}
@@ -414,7 +433,7 @@ export default function Home() {
               />
             </div>
             {radiusInput && (
-              <button data-testid="button-clear-radius" onClick={() => setRadiusInput("")} className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0">
+              <button data-testid="button-clear-radius" onClick={() => setRadiusInput("")} aria-label="Clear radius" className="text-muted-foreground hover:text-foreground transition-colors p-1 shrink-0">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -460,28 +479,31 @@ export default function Home() {
           )}
         </div>
 
-        {/* Status messages */}
-        {status === "locating" && (
-          <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
-            <MapPin className="w-8 h-8 animate-bounce text-primary/70" />
-            <p className="font-mono text-sm uppercase tracking-widest">Acquiring GPS Signal...</p>
-          </div>
-        )}
-        {status === "searching" && (
-          <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
-            <Search className="w-8 h-8 animate-pulse text-primary/70" />
-            <p className="font-mono text-sm uppercase tracking-widest">Triangulating Destination...</p>
-          </div>
-        )}
-        {status === "error" && (
-          <div className="flex flex-col items-center text-destructive space-y-4 p-8 bg-destructive/10 rounded-3xl border border-destructive/20 w-full max-w-lg mx-auto animate-in slide-in-from-bottom-4 duration-300">
-            <AlertCircle className="w-10 h-10" />
-            <p className="text-center font-medium text-destructive-foreground/90">{errorMsg}</p>
-            <Button data-testid="button-retry" variant="outline" className="mt-4 border-destructive/30 hover:bg-destructive/20" onClick={handleSearch}>
-              Try Again
-            </Button>
-          </div>
-        )}
+        {/* Status messages - role="status" + aria-live so screen readers
+            announce these as they swap, not just sighted users */}
+        <div role="status" aria-live="polite">
+          {status === "locating" && (
+            <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
+              <MapPin className="w-8 h-8 animate-bounce text-primary/70" />
+              <p className="font-mono text-sm uppercase tracking-widest">Acquiring GPS Signal...</p>
+            </div>
+          )}
+          {status === "searching" && (
+            <div className="flex flex-col items-center text-muted-foreground space-y-4 animate-in fade-in zoom-in duration-500">
+              <Search className="w-8 h-8 animate-pulse text-primary/70" />
+              <p className="font-mono text-sm uppercase tracking-widest">Triangulating Destination...</p>
+            </div>
+          )}
+          {status === "error" && (
+            <div className="flex flex-col items-center text-destructive space-y-4 p-8 bg-destructive/10 rounded-3xl border border-destructive/20 w-full max-w-lg mx-auto animate-in slide-in-from-bottom-4 duration-300">
+              <AlertCircle className="w-10 h-10" />
+              <p className="text-center font-medium text-destructive-foreground/90">{errorMsg}</p>
+              <Button data-testid="button-retry" variant="outline" className="mt-4 border-destructive/30 hover:bg-destructive/20" onClick={handleSearch}>
+                Try Again
+              </Button>
+            </div>
+          )}
+        </div>
 
         {/* Distance result */}
         {status === "success" && primaryValue !== null && bearing !== null && destLoc && (
@@ -501,24 +523,30 @@ export default function Home() {
         {/* Map — always visible, gains markers/arc as locations are resolved */}
         <div className="w-full space-y-6">
           <div className="relative">
-            <DistanceMap
-              userLat={activeLocLat}
-              userLon={activeLocLon}
-              destLat={destLoc?.lat}
-              destLon={destLoc?.lon}
-              radiusMiles={radiusMilesForMap}
-              radiusCenterLat={radiusCenterLat}
-              radiusCenterLon={radiusCenterLon}
-              destName={destLoc?.name.split(",")[0].trim()}
-              userLabel={userLabel}
-              pickMode={pickMode}
-              onPickLocation={handlePickLocation}
-              radiusPlaces={showPlaces ? radiusPlaces : []}
-              onRadiusChange={(miles) => {
-                const val = unit === "miles" ? miles : Math.round(miles * 1.60934);
-                setRadiusInput(String(val));
-              }}
-            />
+            <Suspense fallback={
+              <div className="w-full rounded-3xl border border-border/30 bg-card/40 flex items-center justify-center h-[min(500px,70vh)]">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            }>
+              <DistanceMap
+                userLat={activeLocLat}
+                userLon={activeLocLon}
+                destLat={destLoc?.lat}
+                destLon={destLoc?.lon}
+                radiusMiles={radiusMilesForMap}
+                radiusCenterLat={radiusCenterLat}
+                radiusCenterLon={radiusCenterLon}
+                destName={destLoc?.name.split(",")[0].trim()}
+                userLabel={userLabel}
+                pickMode={pickMode}
+                onPickLocation={handlePickLocation}
+                radiusPlaces={showPlaces ? radiusPlaces : []}
+                onRadiusChange={(miles) => {
+                  const val = unit === "miles" ? miles : Math.round(miles * 1.60934);
+                  setRadiusInput(String(val));
+                }}
+              />
+            </Suspense>
             {/* Pick buttons */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-auto z-10">
               <button

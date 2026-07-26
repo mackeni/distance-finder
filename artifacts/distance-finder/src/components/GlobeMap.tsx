@@ -448,8 +448,7 @@ function MapView({
   return (
     <div
       data-testid="map-container"
-      className="relative w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl"
-      style={{ height: 500 }}
+      className="relative w-full rounded-3xl overflow-hidden border border-border/30 shadow-2xl h-[min(500px,70vh)]"
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
       {pickMode && (
@@ -490,8 +489,7 @@ class MapErrorBoundary extends Component<
       return (
         <div
           data-testid="map-container"
-          className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8"
-          style={{ height: 500 }}
+          className="w-full rounded-3xl border border-border/30 bg-card/40 flex flex-col items-center justify-center gap-3 text-center px-8 h-[min(500px,70vh)]"
         >
           <span className="text-4xl">🗺️</span>
           <p className="text-muted-foreground font-medium">Map requires WebGL</p>
