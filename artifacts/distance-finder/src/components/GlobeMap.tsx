@@ -154,6 +154,26 @@ function geodesicCircleForMapLibre(
   };
 }
 
+/**
+ * The circle's true edge, for the outline layer — deliberately separate from
+ * geodesicCircleForMapLibre's fill polygon. That polygon adds pole-crossing
+ * cap segments and, for large radii, the WORLD_RING rectangle — neither is
+ * part of the actual boundary (the pole sits deep inside the shaded area,
+ * not on its edge), and drawing them as a line traces the antimeridian and
+ * the poles as bold, meaningless strokes across the map. The raw circle ring
+ * is already the correct edge in every case: a point at distance d from
+ * (lat, lon) is always at distance (180°−d) from its antipode, so this same
+ * curve is exactly the complement-cap boundary the fill's hole strategy cuts
+ * out for large radii too — no antipode math needed here.
+ */
+function geodesicCircleOutline(lat: number, lon: number, radiusKm: number): GeoJSON.Geometry {
+  const d = radiusKm / 6371.0088;
+  if (d >= Math.PI) {
+    return { type: "LineString", coordinates: [] }; // whole world in range — no edge to draw
+  }
+  return { type: "LineString", coordinates: geodesicCircleMapLibre(lat, lon, radiusKm) };
+}
+
 /** Great-circle interpolated points — [lon, lat] for GeoJSON LineString. */
 function greatCirclePoints(
   lat1: number, lon1: number,
@@ -237,10 +257,11 @@ function MapView({
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     map.on("load", () => {
       map.addSource("radius", { type: "geojson", data: EMPTY_POLY });
+      map.addSource("radius-line", { type: "geojson", data: EMPTY_LINE });
       map.addSource("arc", { type: "geojson", data: EMPTY_LINE });
       map.addSource("places", { type: "geojson", data: EMPTY_FC });
       map.addLayer({ id: "radius-fill", type: "fill", source: "radius", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.15 } });
-      map.addLayer({ id: "radius-outline", type: "line", source: "radius", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
+      map.addLayer({ id: "radius-outline", type: "line", source: "radius-line", paint: { "line-color": "#d97706", "line-width": 2, "line-opacity": 0.7 } });
       map.addLayer({ id: "arc-line", type: "line", source: "arc", paint: { "line-color": "#2563eb", "line-width": 2.5, "line-opacity": 0.85 } });
       map.addLayer({ id: "places-dot", type: "circle", source: "places", paint: { "circle-radius": 5, "circle-color": "#22c55e", "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" } });
       map.addLayer({
@@ -329,12 +350,21 @@ function MapView({
   useEffect(() => {
     const map = mapRef.current;
     if (!mapLoaded || !map) return;
-    const geometry: GeoJSON.Geometry = hasRadiusCentre && radiusKm
+    const hasRadius = hasRadiusCentre && radiusKm;
+    const fillGeometry: GeoJSON.Geometry = hasRadius
       ? geodesicCircleForMapLibre(rCLat!, rCLon!, radiusKm)
       : { type: "Polygon", coordinates: [[]] };
+    const outlineGeometry: GeoJSON.Geometry = hasRadius
+      ? geodesicCircleOutline(rCLat!, rCLon!, radiusKm)
+      : { type: "LineString", coordinates: [] };
     (map.getSource("radius") as maplibregl.GeoJSONSource).setData({
       type: "Feature",
-      geometry,
+      geometry: fillGeometry,
+      properties: {},
+    });
+    (map.getSource("radius-line") as maplibregl.GeoJSONSource).setData({
+      type: "Feature",
+      geometry: outlineGeometry,
       properties: {},
     });
   }, [mapLoaded, hasRadiusCentre, rCLat, rCLon, radiusKm]);
