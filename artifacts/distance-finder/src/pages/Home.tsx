@@ -213,9 +213,8 @@ export default function Home() {
   };
 
   // Radius → always convert to miles for the map
-  const parsedRadiusRaw =
-    radiusInput !== "" && !isNaN(parseFloat(radiusInput)) && parseFloat(radiusInput) > 0
-      ? parseFloat(radiusInput) : undefined;
+  const parsedRadius = parseFloat(radiusInput);
+  const parsedRadiusRaw = !isNaN(parsedRadius) && parsedRadius > 0 ? parsedRadius : undefined;
   const radiusMilesForMap = parsedRadiusRaw
     ? (unit === "miles" ? parsedRadiusRaw : parsedRadiusRaw / 1.60934)
     : undefined;

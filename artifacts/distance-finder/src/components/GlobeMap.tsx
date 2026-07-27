@@ -76,10 +76,8 @@ function geodesicCircle(lat: number, lon: number, radiusKm: number, steps = 256)
   return coords;
 }
 
-/** CCW + antimeridian-unwrapped ring for MapLibre GL (use as outer/fill ring). */
-function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
-  const raw = geodesicCircle(lat, lon, radiusKm);
-  raw.reverse(); // CW → CCW
+/** Rewalk a ring's longitudes as a continuous unwrapped path (no ±180° jumps). */
+function unwrapAntimeridian(raw: [number, number][]): [number, number][] {
   const out: [number, number][] = [raw[0]];
   for (let i = 1; i < raw.length; i++) {
     let dLon = raw[i][0] - out[i - 1][0];
@@ -90,17 +88,17 @@ function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [nu
   return out;
 }
 
+/** CCW + antimeridian-unwrapped ring for MapLibre GL (use as outer/fill ring). */
+function geodesicCircleMapLibre(lat: number, lon: number, radiusKm: number): [number, number][] {
+  const raw = geodesicCircle(lat, lon, radiusKm);
+  raw.reverse(); // CW → CCW
+  return unwrapAntimeridian(raw);
+}
+
 /** CW + antimeridian-unwrapped ring — use as a hole ring inside a polygon. */
 function geodesicCircleMapLibreCW(lat: number, lon: number, radiusKm: number): [number, number][] {
   const raw = geodesicCircle(lat, lon, radiusKm); // already CW
-  const out: [number, number][] = [raw[0]];
-  for (let i = 1; i < raw.length; i++) {
-    let dLon = raw[i][0] - out[i - 1][0];
-    if (dLon > 180) dLon -= 360;
-    if (dLon < -180) dLon += 360;
-    out.push([out[i - 1][0] + dLon, raw[i][1]]);
-  }
-  return out;
+  return unwrapAntimeridian(raw);
 }
 
 /** World-spanning outer ring (CCW) — used as the fill base for large circles. */
