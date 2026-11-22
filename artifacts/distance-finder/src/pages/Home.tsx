@@ -49,6 +49,11 @@ export default function Home() {
   // Destination
   const [toInput, setToInput] = useState("");
   const [destLoc, setDestLoc] = useState<LocResult | null>(null);
+  // The destination text destLoc was resolved from (typed + geocoded, or the
+  // label written in by a map pick). While toInput still matches it, Find
+  // reuses destLoc instead of re-geocoding the label, which could resolve to a
+  // different place than the exact point picked.
+  const [destQuery, setDestQuery] = useState<string | null>(null);
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [bearing, setBearing] = useState<number | null>(null);
 
@@ -96,7 +101,10 @@ export default function Home() {
 
       if (usingCustomStart) {
         setStatus("searching");
-        const from = await geocode(fromInput.trim());
+        // customStart is cleared whenever the From box is edited, so if it's
+        // still set it matches the current text — reuse it rather than
+        // re-geocoding (keeps an exact map-picked point exact).
+        const from = customStart ?? await geocode(fromInput.trim());
         setCustomStart(from);
         startLat = from.lat;
         startLon = from.lon;
@@ -119,9 +127,11 @@ export default function Home() {
       }
 
       // Geocode destination only if one was entered
-      if (toInput.trim()) {
-        const dest = await geocode(toInput.trim());
+      const toQuery = toInput.trim();
+      if (toQuery) {
+        const dest = destLoc && destQuery === toQuery ? destLoc : await geocode(toQuery);
         setDestLoc(dest);
+        setDestQuery(toQuery);
         setDistanceKm(haversineKm(startLat, startLon, dest.lat, dest.lon));
         setBearing(getBearing(startLat, startLon, dest.lat, dest.lon));
       } else {
@@ -162,6 +172,7 @@ export default function Home() {
       } else {
         setToInput(shortName);
         setDestLoc(loc);
+        setDestQuery(shortName.trim());
         const startLat = usingCustomStart ? customStart?.lat : gpsLoc?.lat;
         const startLon = usingCustomStart ? customStart?.lon : gpsLoc?.lon;
         if (startLat !== undefined && startLon !== undefined) {
@@ -284,7 +295,14 @@ export default function Home() {
         .catch((err) => { if ((err as any)?.name !== "AbortError") console.error("Places fetch error:", err); })
         .then(() => { if (!controller.signal.aborted) setPlacesLoading(false); });
     }, 600);
-    return () => { clearTimeout(timer); controller.abort(); };
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+      // The aborted fetch's .then skips clearing the spinner, so clear it
+      // here — otherwise toggling off / clearing the radius mid-fetch leaves
+      // it spinning forever.
+      setPlacesLoading(false);
+    };
   }, [showPlaces, parsedRadiusRaw, radiusCenterLat, radiusCenterLon, unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Distance display
@@ -579,7 +597,7 @@ export default function Home() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-card/50 backdrop-blur-sm border border-border/50 p-6 rounded-3xl space-y-3 flex flex-col items-center text-center">
                   <div className="p-3 rounded-2xl bg-secondary/50">
-                    <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing}deg)` }} />
+                    <Navigation className="w-6 h-6 text-primary" style={{ transform: `rotate(${bearing - 45}deg)` /* lucide's Navigation glyph points NE (45°) at rest */ }} />
                   </div>
                   <h3 className="font-medium text-foreground">Bearing</h3>
                   <p className="text-sm text-muted-foreground font-mono">
