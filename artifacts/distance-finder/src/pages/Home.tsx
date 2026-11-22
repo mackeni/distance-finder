@@ -267,26 +267,28 @@ export default function Home() {
           const allRecords = responses.flatMap((d) => d.results || []);
           // Sort all records by population desc so highest-pop town wins each sector
           allRecords.sort((a: any, b: any) => (b.population ?? 0) - (a.population ?? 0));
-          // Dedup by name first (Geonames has multiple entries per city with slightly different coords)
-          const seenNames = new Set<string>();
+          // Dedup near-duplicates: Geonames has multiple entries per city with
+          // slightly different coords. Only treat same-name records as one
+          // place when they're close together, so distinct towns that share a
+          // name (e.g. several Springfields) are all kept.
+          const DUP_KM = 30;
+          const keptByName = new Map<string, { lat: number; lon: number }[]>();
           const uniqueRecords = allRecords.filter((rec: any) => {
             const key = (rec.name || "").toLowerCase().trim();
-            if (!key || seenNames.has(key)) return false;
-            seenNames.add(key);
+            const lat = rec.coordinates?.lat, lon = rec.coordinates?.lon;
+            if (!key || lat === undefined || lon === undefined) return false;
+            const kept = keptByName.get(key) ?? [];
+            if (kept.some((k) => haversineKm(k.lat, k.lon, lat, lon) < DUP_KM)) return false;
+            kept.push({ lat, lon });
+            keptByName.set(key, kept);
             return true;
           });
           // One town per 2° bearing sector (1° was too fine — adjacent sectors overlap visually)
           const SECTOR_DEG = 2;
           const byDegree = new Map<number, { lat: number; lon: number; name: string }>();
           uniqueRecords.forEach((rec: any) => {
-            const lat2 = rec.coordinates?.lat, lon2 = rec.coordinates?.lon;
-            if (lat2 === undefined || lon2 === undefined) return;
-            const dLon = (lon2 - radiusCenterLon!) * Math.PI / 180;
-            const lat1r = radiusCenterLat! * Math.PI / 180, lat2r = lat2 * Math.PI / 180;
-            const bearing = (Math.atan2(
-              Math.sin(dLon) * Math.cos(lat2r),
-              Math.cos(lat1r) * Math.sin(lat2r) - Math.sin(lat1r) * Math.cos(lat2r) * Math.cos(dLon)
-            ) * 180 / Math.PI + 360) % 360;
+            const lat2 = rec.coordinates.lat, lon2 = rec.coordinates.lon;
+            const bearing = getBearing(radiusCenterLat!, radiusCenterLon!, lat2, lon2);
             const sector = Math.floor(bearing / SECTOR_DEG);
             if (!byDegree.has(sector)) byDegree.set(sector, { lat: lat2, lon: lon2, name: rec.name || "Place" });
           });
@@ -319,6 +321,18 @@ export default function Home() {
   const ewDirection = (activeLoc && destLoc) ? eastWestDir(activeLoc.lon, destLoc.lon) : null;
   const nsDisplay = nsKm != null ? (unit === "miles" ? nsKm * 0.621371 : nsKm) : null;
   const ewDisplay = ewKm != null ? (unit === "miles" ? ewKm * 0.621371 : ewKm) : null;
+
+  // Switching units keeps the radius the same physical size: convert the
+  // typed value rather than reinterpreting it in the new unit.
+  const changeUnit = (u: Unit) => {
+    if (u === unit) return;
+    const r = parseFloat(radiusInput);
+    if (!isNaN(r) && r > 0) {
+      const converted = u === "km" ? r * 1.60934 : r / 1.60934;
+      setRadiusInput(String(Math.round(converted * 10) / 10));
+    }
+    setUnit(u);
+  };
 
   const busy = status === "locating" || status === "searching";
 
@@ -427,7 +441,7 @@ export default function Home() {
                       : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                   }`}
                 >
-                  <input type="radio" name="unit" value={u} checked={unit === u} onChange={() => setUnit(u)} className="sr-only" />
+                  <input type="radio" name="unit" value={u} checked={unit === u} onChange={() => changeUnit(u)} className="sr-only" />
                   {u}
                 </label>
               ))}
