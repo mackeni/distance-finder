@@ -37,11 +37,14 @@ export function northSouthDir(lat1: number, lat2: number): string {
 }
 
 /**
- * Distance in km purely along the east–west axis at the destination latitude.
- * Uses the shorter path around the globe.
+ * Distance in km purely along the east–west axis at the destination latitude,
+ * i.e. measured along that parallel (not the great circle between the two
+ * points, which bows toward the pole). Uses the shorter way around the globe.
  */
 export function eastWestKm(lon1: number, lat2: number, lon2: number): number {
-  return haversineKm(lat2, lon1, lat2, lon2);
+  const R = 6371;
+  const dLon = Math.abs(((lon2 - lon1 + 540) % 360) - 180);
+  return R * Math.cos(lat2 * Math.PI / 180) * dLon * Math.PI / 180;
 }
 
 /** E or W direction label (shortest arc). */

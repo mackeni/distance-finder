@@ -285,7 +285,14 @@ function greatCirclePoints(
     const lng = (Math.atan2(y, x) * 180) / Math.PI;
     pts.push([lng, lat]);
   }
-  return pts;
+  // atan2 wraps longitude to ±180, so a route crossing the antimeridian would
+  // jump ~360° mid-line and streak across the whole map. Keep it continuous.
+  return unwrapAntimeridian(pts);
+}
+
+/** Shift lon by a multiple of 360 so it lies within ±180° of ref. */
+function lonNear(lon: number, ref: number): number {
+  return ref + (((lon - ref + 540) % 360) - 180);
 }
 
 // ─── 2D MapLibre view ─────────────────────────────────────────────────────────
@@ -378,7 +385,10 @@ function MapView({
     if (!hasUser) return;
 
     const fit = () => {
-      // Build combined bounding box from all visible features
+      // Build combined bounding box from all visible features. Longitudes are
+      // taken relative to the user's (lonNear) so a pair straddling the
+      // antimeridian yields a tight box rather than one spanning the world —
+      // MapLibre's fitBounds accepts longitudes outside ±180.
       let minLon = userLon!;
       let maxLon = userLon!;
       let minLat = userLat!;
@@ -386,15 +396,17 @@ function MapView({
 
       if (radiusKm && hasRadiusCentre) {
         const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
-        minLon = Math.min(minLon, rCLon! - degRadius);
-        maxLon = Math.max(maxLon, rCLon! + degRadius);
+        const cLon = lonNear(rCLon!, userLon!);
+        minLon = Math.min(minLon, cLon - degRadius);
+        maxLon = Math.max(maxLon, cLon + degRadius);
         minLat = Math.max(-85, Math.min(minLat, rCLat! - degRadius));
         maxLat = Math.min(85, Math.max(maxLat, rCLat! + degRadius));
       }
 
       if (hasDest && destLat !== undefined && destLon !== undefined) {
-        minLon = Math.min(minLon, destLon);
-        maxLon = Math.max(maxLon, destLon);
+        const dLon = lonNear(destLon, userLon!);
+        minLon = Math.min(minLon, dLon);
+        maxLon = Math.max(maxLon, dLon);
         minLat = Math.max(-85, Math.min(minLat, destLat));
         maxLat = Math.min(85, Math.max(maxLat, destLat));
       }
