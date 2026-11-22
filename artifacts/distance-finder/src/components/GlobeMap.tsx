@@ -316,7 +316,7 @@ function MapView({
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const [radiusLocked, setRadiusLocked] = useState(true);
-  const radiusLockedRef = useRef(false);
+  const radiusLockedRef = useRef(radiusLocked);
   radiusLockedRef.current = radiusLocked;
   const toggleLock = useCallback(() => setRadiusLocked(v => !v), []);
 
@@ -395,10 +395,18 @@ function MapView({
       let maxLat = userLat!;
 
       if (radiusKm && hasRadiusCentre) {
-        const degRadius = (radiusKm / 6371.0088) * (180 / Math.PI);
+        const dR = radiusKm / 6371.0088; // angular radius, radians
+        const degRadius = (dR * 180) / Math.PI;
+        const cLatR = (rCLat! * Math.PI) / 180;
+        // A circle's longitude half-width grows as 1/cos(lat) away from the
+        // equator — the exact value is asin(sin d / cos lat). Once the circle
+        // reaches a pole it spans every longitude.
+        const lonHalf = dR >= Math.PI / 2 - Math.abs(cLatR)
+          ? 180
+          : (Math.asin(Math.sin(dR) / Math.cos(cLatR)) * 180) / Math.PI;
         const cLon = lonNear(rCLon!, userLon!);
-        minLon = Math.min(minLon, cLon - degRadius);
-        maxLon = Math.max(maxLon, cLon + degRadius);
+        minLon = Math.min(minLon, cLon - lonHalf);
+        maxLon = Math.max(maxLon, cLon + lonHalf);
         minLat = Math.max(-85, Math.min(minLat, rCLat! - degRadius));
         maxLat = Math.min(85, Math.max(maxLat, rCLat! + degRadius));
       }
@@ -594,7 +602,7 @@ function MapView({
     >
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
       {pickMode && (
-        <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-4">
+        <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-14">
           <div className="bg-black/70 text-white text-sm font-semibold px-4 py-2 rounded-full backdrop-blur-sm">
             Click anywhere on the map to set {pickMode === "from" ? "start" : "destination"}
           </div>
