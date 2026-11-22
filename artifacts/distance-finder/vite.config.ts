@@ -25,6 +25,10 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // The lazily-loaded map chunk is ~775 kB, almost all of it maplibre-gl
+    // itself; it's already split out of the initial load (see Home.tsx), so
+    // the default 500 kB warning is just noise.
+    chunkSizeWarningLimit: 800,
   },
   server: {
     port,
