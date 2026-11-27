@@ -43,7 +43,6 @@ export default function Home() {
   // Start location: GPS (default) or custom typed place
   const [fromInput, setFromInput] = useState("");
   const [gpsLoc, setGpsLoc] = useState<{ lat: number; lon: number } | null>(null);
-  const [gpsLocating, setGpsLocating] = useState(false);
   const [customStart, setCustomStart] = useState<LocResult | null>(null);
 
   // Destination
@@ -67,17 +66,17 @@ export default function Home() {
   const [pickMode, setPickMode] = useState<PickMode>(null);
 
   const toInputRef = useRef<HTMLInputElement>(null);
+  // Bumped on every map pick; a pick's reverse-geocode result is applied only
+  // if no newer pick has started meanwhile, so overlapping lookups can't land
+  // out of order and overwrite the latest pick.
+  const pickSeqRef = useRef(0);
 
   // Silently acquire GPS on mount (used when fromInput is empty)
   useEffect(() => {
     if (!navigator.geolocation) return;
-    setGpsLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setGpsLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-        setGpsLocating(false);
-      },
-      () => setGpsLocating(false),
+      (pos) => setGpsLoc({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => {}, // no permission / unavailable: Find will ask again or the user can type a start
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   }, []);
@@ -155,10 +154,12 @@ export default function Home() {
   const handlePickLocation = async (lat: number, lng: number) => {
     const mode = pickMode;
     setPickMode(null);
+    const seq = ++pickSeqRef.current;
 
     // Apply the picked location and keep distance/bearing/status in sync with it,
     // whether the name came from a successful reverse-geocode or the raw-coord fallback.
     const applyPickedLocation = (shortName: string, loc: LocResult) => {
+      if (seq !== pickSeqRef.current) return; // superseded by a newer pick
       if (mode === "from") {
         setFromInput(shortName);
         setCustomStart(loc);
@@ -179,6 +180,9 @@ export default function Home() {
           setDistanceKm(haversineKm(startLat, startLon, loc.lat, loc.lon));
           setBearing(getBearing(startLat, startLon, loc.lat, loc.lon));
           setStatus("success");
+        } else {
+          // No start yet — clear any stale error from an earlier search.
+          setStatus("idle");
         }
       }
     };

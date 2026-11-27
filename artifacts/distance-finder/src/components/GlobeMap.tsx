@@ -247,7 +247,13 @@ function MapView({
     if (!mapLoaded || !map) return;
     map.getCanvas().style.cursor = pickMode ? "crosshair" : "";
     const onClick = (e: maplibregl.MapMouseEvent) => {
-      if (pickMode && onPickLocation) onPickLocation(e.lngLat.lat, e.lngLat.lng);
+      // The map repeats the world side by side and click coordinates aren't
+      // wrapped, so a click on a world copy can report e.g. lng 200; wrap it
+      // back into ±180 before it reaches the geocoder and the places query.
+      if (pickMode && onPickLocation) {
+        const { lat, lng } = e.lngLat.wrap();
+        onPickLocation(lat, lng);
+      }
     };
     map.on("click", onClick);
     return () => { map.off("click", onClick); };
